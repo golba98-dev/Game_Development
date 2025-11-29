@@ -1871,7 +1871,7 @@ function preload() {
       paths.forEach((p, idx) => {
         if (p) {
           idleFrames[dir][idx] = null;
-          loadImage(p,
+          trackLoadImage(`idle_frame:${p}`, p,
             (img) => { idleFrames[dir][idx] = img; console.log('[game] loaded frame', dir, idx, p, img.width, 'x', img.height); },
             (err) => { console.warn('[game] failed to load frame', dir, idx, p, err); idleFrames[dir][idx] = null; }
           );
@@ -1882,8 +1882,8 @@ function preload() {
     } else if (IDLE_FRAME_TEMPLATE) {
       for (let i = 0; i < IDLE_SHEET_COLS; i++) {
         const p = IDLE_FRAME_TEMPLATE.replace('{DIR}', dir).replace('{COL}', String(i));
-        idleFrames[dir][i] = loadImage(p,
-          () => { console.log('[game] loaded frame', dir, i, p); },
+        trackLoadImage(`idle_frame_template:${p}`, p,
+          (img) => { idleFrames[dir][i] = img; console.log('[game] loaded frame', dir, i, p); },
           (err) => { console.warn('[game] failed to load frame', dir, i, p, err); idleFrames[dir][i] = null; }
         );
       }
@@ -1909,7 +1909,7 @@ function preload() {
       paths.forEach((p, idx) => {
         if (p) {
           walkFrames[dir][idx] = null;
-          loadImage(p,
+          trackLoadImage(`walk_frame:${p}`, p,
             (img) => { walkFrames[dir][idx] = img; console.log('[game] loaded walk frame', dir, idx, p, img.width, 'x', img.height); },
             (err) => { console.warn('[game] failed to load walk frame', dir, idx, p, err); walkFrames[dir][idx] = null; }
           );
@@ -1920,8 +1920,8 @@ function preload() {
     } else if (WALK_FRAME_TEMPLATE) {
       for (let i = 0; i < IDLE_SHEET_COLS; i++) {
         const p = WALK_FRAME_TEMPLATE.replace('{DIR}', dir).replace('{COL}', String(i));
-        walkFrames[dir][i] = loadImage(p,
-          () => { console.log('[game] loaded walk frame', dir, i, p); },
+        trackLoadImage(`walk_frame_template:${p}`, p,
+          (img) => { walkFrames[dir][i] = img; console.log('[game] loaded walk frame', dir, i, p); },
           (err) => { console.warn('[game] failed to load walk frame', dir, i, p, err); walkFrames[dir][i] = null; }
         );
       }
@@ -1934,7 +1934,7 @@ function preload() {
       paths.forEach((p, idx) => {
         if (p) {
           runFrames[dir][idx] = null;
-          loadImage(p,
+          trackLoadImage(`run_frame:${p}`, p,
             (img) => { runFrames[dir][idx] = img; console.log('[game] loaded run frame', dir, idx, p, img.width, 'x', img.height); },
             (err) => { console.warn('[game] failed to load run frame', dir, idx, p, err); runFrames[dir][idx] = null; }
           );
@@ -1945,8 +1945,8 @@ function preload() {
     } else if (RUN_FRAME_TEMPLATE) {
       for (let i = 0; i < IDLE_SHEET_COLS; i++) {
         const p = RUN_FRAME_TEMPLATE.replace('{DIR}', dir).replace('{COL}', String(i));
-        runFrames[dir][i] = loadImage(p,
-          () => { console.log('[game] loaded run frame', dir, i, p); },
+        trackLoadImage(`run_frame_template:${p}`, p,
+          (img) => { runFrames[dir][i] = img; console.log('[game] loaded run frame', dir, i, p); },
           (err) => { console.warn('[game] failed to load run frame', dir, i, p, err); runFrames[dir][i] = null; }
         );
       }
