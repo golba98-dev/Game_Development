@@ -4971,6 +4971,7 @@ function keyPressed() {
     jumpFrame = 0;
     jumpTimer = 0;
 
+    
     try {
       const nowA = (typeof keyIsDown === 'function') ? keyIsDown(65) : false;
       const nowD = (typeof keyIsDown === 'function') ? keyIsDown(68) : false;
@@ -5042,6 +5043,7 @@ function keyPressed() {
     return;
   }
 
+  
   if (key === 'o' || key === 'O') {
     try {
       console.log('[game] debug key O pressed — forcing inGameMenuVisible = true');
@@ -5050,6 +5052,8 @@ function keyPressed() {
     return;
   }
 }
+
+
 try {
   window.addEventListener('keydown', (e) => {
     try {
@@ -5058,6 +5062,7 @@ try {
         const active = document && document.activeElement;
         if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) return;
 
+        
         try {
           const ig = (typeof document !== 'undefined') ? document.getElementById('gd-in-game-settings') : null;
           if (ig) {
@@ -5067,6 +5072,7 @@ try {
           }
         } catch (err) {  }
 
+        
         try {
           inGameMenuVisible = !inGameMenuVisible;
           e.preventDefault();
@@ -5080,25 +5086,36 @@ try {
 
 
 
-function getColorForState(state) { 
+function getColorForState(state) {
+  
   if (typeof COLORS !== 'undefined' && COLORS[state]) {
     return COLORS[state];
   }
+  
   return [255, 0, 255]; 
 }
 
 function isBrownPixel(r, g, b, tolerance = 10, strict = false) {
+  
+  
   return (r > 60 && r < 180 && g > 30 && g < 120 && b < 80);
 }
 
 
+
+
+
 function getColorForState(state) {
+  
   if (typeof COLORS !== 'undefined' && COLORS[state]) {
     return COLORS[state];
   }
+  
   return [255, 0, 255]; 
 }
 
 function isBrownPixel(r, g, b, tolerance = 10, strict = false) {
+  
+  
   return (r > 60 && r < 180 && g > 30 && g < 120 && b < 80);
 }
