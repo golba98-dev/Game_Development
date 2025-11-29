@@ -1,0 +1,20 @@
+{
+  "logicalW": 4,
+  "logicalH": 3,
+  "cellSize": 32,
+  "mapStates": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "timestamp": 1700000000000
+}
