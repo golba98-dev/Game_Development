@@ -2002,14 +2002,12 @@ function setup() {
   createCanvas(W, H);
   noSmooth();
   try { injectCustomStyles(); } catch (e) { console.warn('[game] injectCustomStyles call failed', e); }
-  
   const urlParams = new URLSearchParams(window.location.search);
   masterVol = parseFloat(urlParams.get('masterVol')) || 0.8;
   musicVol = parseFloat(urlParams.get('musicVol')) || 0.6;
   sfxVol = parseFloat(urlParams.get('sfxVol')) || 0.7;
   const urlDifficulty = urlParams.get('difficulty');
   setDifficulty(urlDifficulty, { regenerate: false, reason: 'url-param' });
-  
   const urlRiverClear = (urlParams.get('riverClear') || '').toLowerCase();
   if (urlRiverClear === RIVER_CLEAR_MODES.ALWAYS || urlRiverClear === 'true') {
     riverClearMode = RIVER_CLEAR_MODES.ALWAYS;
@@ -2022,74 +2020,92 @@ function setup() {
   let loadedFromStorage = false;
   let loadedFromServer = false;
   let serverFetchPromise = Promise.resolve(false);
-
-  // Initialize server fetch attempt
   try {
     const tryServer = (typeof window !== 'undefined' && window.location && (window.location.hostname === 'localhost')) || (new URLSearchParams(window.location.search).get('useServer') === '1');
     if (!isNewGame && tryServer) {
-      serverFetchPromise = tryFetchActiveMap();
+      try {
+        serverFetchPromise = tryFetchActiveMap();
+      } catch (e) { console.warn('[game] tryFetchActiveMap failed', e); serverFetchPromise = Promise.resolve(false); }
+    } else {
+      if (!isNewGame) console.log('[game] skipping workspace server fetch (not on localhost)');
+      else console.log('[game] new game detected, will generate a fresh map.');
     }
-  } catch (e) { serverFetchPromise = Promise.resolve(false); }
+  } catch (e) { console.warn('[game] loadMapFromStorage/Server init failed', e); serverFetchPromise = Promise.resolve(false); }
 
-  // FAILSAFE: Force the game to load if assets get stuck for more than 5 seconds
-  setTimeout(() => {
-    if (showLoadingOverlay) {
-        console.warn('[game] Failsafe triggered: Assets took too long. Forcing start.');
-        overlayMessage = 'Starting...';
-        if (!mapLoadComplete) {
-            // Try storage, otherwise generate
-            if (!loadMapFromStorage()) {
-                generateMap();
-            }
-        }
-        showLoadingOverlay = false; 
-    }
-  }, 5000);
-
-  // Normal Asset Load
+  
   AssetTracker.waitReady(3500).then((ready) => {
     if (ready) {
       console.log('[game] assets loaded before map init');
     } else {
-      console.warn('[game] assets did not fully load before timeout; proceeding anyway');
-      try { showToast('Asset load timeout — showing raw map', 'warn', 3000); } catch (e) {}
+      console.warn('[game] assets did not fully load before timeout; proceeding');
+      try { showToast('Asset load timeout — processing map...', 'warn', 3000); } catch (e) {}
     }
 
-    serverFetchPromise.then((serverLoaded) => {
-        loadedFromServer = !!serverLoaded;
-        if (!loadedFromServer) {
-          loadedFromStorage = !!loadMapFromStorage();
-          if (loadedFromStorage) console.log('[game] loaded map from storage');
-        }
+    
+    const ensureGameStarts = () => {
+        console.log('[game] No saved map found (or load failed). Auto-generating new map...');
+        generateMap();
+    };
 
-        // Logic fix: Ensure we hide overlay or generate map if nothing loaded
-        if (!loadedFromStorage && !loadedFromServer) {
-          if (isNewGame) {
-            generateMap(); // This sets showLoadingOverlay = false inside itself
+    try {
+      serverFetchPromise.then((serverLoaded) => {
+        try {
+          loadedFromServer = !!serverLoaded;
+          
+          
+          if (!loadedFromServer) {
+            loadedFromStorage = !!loadMapFromStorage();
+          }
+
+          
+         if (!loadedFromStorage && !loadedFromServer) {
+            
+            console.log('[game] No saved map found. Auto-generating new map...');
+            generateMap();
           } else {
-            // If not new game, but no save found, we MUST hide the overlay so user sees the message
-            overlayMessage = ''; 
-            showLoadingOverlay = false; 
-            try { showToast('No saved map found. Press P to generate.', 'warn', 5000); } catch (e) {}
+            
+            try { createMapImage(); redraw(); } catch (e) { console.warn('[game] failed to recreate mapImage after assets ready', e); }
           }
-        } else {
-          // Map loaded successfully
-          try { createMapImage(); redraw(); } catch (e) {}
+        } catch (e) { 
+          console.warn('[game] error in map load logic, falling back to auto-gen', e);
+          ensureGameStarts();
         }
-      }).catch((e) => { 
-          // Fallback if server promise crashes
-          console.warn('[game] serverFetchPromise failed', e); 
-          if (!loadMapFromStorage()) {
-             generateMap(); // Force generate if everything fails
-          }
+      }).catch((e) => {
+        
+        console.warn('[game] serverFetchPromise failed, checking storage...', e);
+        if (!loadMapFromStorage()) {
+           ensureGameStarts();
+        } else {
+           try { createMapImage(); redraw(); } catch (err) {}
+        }
       });
+    } catch (e) {
+      console.warn('[game] fatal error in setup promise, forcing auto-gen', e);
+      ensureGameStarts();
+    }
+    
+    if (!ready) {
+      
+      try {
+        AssetTracker.onReady(() => {
+          try {
+            console.log('[game] assets finished after timeout — refreshing map image');
+            createMapImage(); 
+            redraw(); 
+          } catch (e) {}
+        });
+      } catch (e) {}
+    }
   });
-
+  
+  
+  try { overlayProgress = 100; updateLoadingOverlayDom(); } catch (e) {}
+  try { _maybeHideLoadingOverlay(); } catch (e) {}
   if (gameMusic) {
     gameMusic.setVolume(musicVol * masterVol);
   }
   if (pendingGameActivated) {
-    try { _confirmResize(); pendingGameActivated = false; } catch (e) {}
+    try { _confirmResize(); pendingGameActivated = false; } catch (e) { console.warn('[game] pending _confirmResize failed', e); }
   }
 }
 
@@ -3965,9 +3981,8 @@ function createMapImage() {
 
 
 function loadMapFromStorage() {
-  try { overlayProgress = 100; updateLoadingOverlayDom(); } catch (e) {}
-  try { _mapImageActiveCount = Math.max(0, (_mapImageActiveCount||0) - 1); } catch (e) {}
-  try { console.log('[game] createMapImage end; _mapImageActiveCount=', _mapImageActiveCount); } catch (e) {}
+  if (isNewGame) {
+    console.log('[game] new game detected, ignoring stored maps and generating a new one.');
     return false;
   }
   try {
@@ -4010,9 +4025,7 @@ function loadMapFromStorage() {
     }
     logicalW = Number(obj.logicalW) || Math.ceil((virtualW || W) / cellSize);
     logicalH = Number(obj.logicalH) || Math.ceil((virtualH || H) / cellSize);
-    console.log(`[game] loaded map from storage. logicalW=${logicalW}, logicalH=${logicalH}, mapStates.length=${obj.mapStates.length}`);
-    const nonZero = obj.mapStates.filter(x => x !== 0).length;
-    console.log(`[game] mapStates has ${nonZero} non-zero tiles out of ${obj.mapStates.length}`);
+    
     if (obj.cellSize && Number(obj.cellSize) > 0) {
       try { cellSize = Number(obj.cellSize); } catch (e) { }
     }
@@ -4038,15 +4051,16 @@ function loadMapFromStorage() {
     createMapImage();
     redraw();
     try { showToast('Loaded saved map', 'info', 2200); } catch (e) {}
-    console.log('[game] loadMapFromStorage: loaded map (logicalW,logicalH)=', logicalW, logicalH);
     try { mapLoadComplete = true; } catch (e) {}
-    try { _maybeHideLoadingOverlay(); } catch (e) {}
+    try { showLoadingOverlay = false; } catch (e) {}
     return true;
   } catch (err) {
     console.warn('[game] loadMapFromStorage error', err);
     return false;
   }
 }
+}
+
 
 function carveRivers(map, w, h, opts) {
   const { clearStartX, clearEndX, clearStartY, clearEndY } = opts;
@@ -4955,7 +4969,6 @@ function keyPressed() {
     jumpFrame = 0;
     jumpTimer = 0;
 
-    
     try {
       const nowA = (typeof keyIsDown === 'function') ? keyIsDown(65) : false;
       const nowD = (typeof keyIsDown === 'function') ? keyIsDown(68) : false;
@@ -5027,7 +5040,6 @@ function keyPressed() {
     return;
   }
 
-  
   if (key === 'o' || key === 'O') {
     try {
       console.log('[game] debug key O pressed — forcing inGameMenuVisible = true');
@@ -5036,8 +5048,6 @@ function keyPressed() {
     return;
   }
 }
-
-
 try {
   window.addEventListener('keydown', (e) => {
     try {
@@ -5046,7 +5056,6 @@ try {
         const active = document && document.activeElement;
         if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) return;
 
-        
         try {
           const ig = (typeof document !== 'undefined') ? document.getElementById('gd-in-game-settings') : null;
           if (ig) {
@@ -5056,7 +5065,6 @@ try {
           }
         } catch (err) {  }
 
-        
         try {
           inGameMenuVisible = !inGameMenuVisible;
           e.preventDefault();
@@ -5070,36 +5078,25 @@ try {
 
 
 
-function getColorForState(state) {
-  
+function getColorForState(state) { 
   if (typeof COLORS !== 'undefined' && COLORS[state]) {
     return COLORS[state];
   }
-  
   return [255, 0, 255]; 
 }
 
 function isBrownPixel(r, g, b, tolerance = 10, strict = false) {
-  
-  
   return (r > 60 && r < 180 && g > 30 && g < 120 && b < 80);
 }
 
 
-
-
-
 function getColorForState(state) {
-  
   if (typeof COLORS !== 'undefined' && COLORS[state]) {
     return COLORS[state];
   }
-  
   return [255, 0, 255]; 
 }
 
 function isBrownPixel(r, g, b, tolerance = 10, strict = false) {
-  
-  
   return (r > 60 && r < 180 && g > 30 && g < 120 && b < 80);
 }
