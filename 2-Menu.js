@@ -572,89 +572,7 @@ function createSettingLabel(txt, x, y, maxWidth = 200) {
   return d;
 }
 
-function createSettingsContext({ labelX, controlX, controlWidth, panelH, startY, spacingY }) {
-  let y = startY;
-  const ctx = {
-    get y() { return y; },
-    set y(value) { y = value; },
-    layout: { labelX, controlX, controlWidth, panelH, spacingY },
-    addSliderRow(name, min, max, val, callback, options = {}) {
-      const { isAudio = false, settingKey = null, dataAttrs = {} } = options;
-      const lbl = createSettingLabel(name, labelX, y, controlX - labelX - 20);
-      activeSettingElements.push(lbl);
-      const slider = createSlider(min, max, val);
-      slider.position(controlX, y + CONTROL_VERTICAL_NUDGE);
-      slider.style("width", controlWidth + "px");
-      slider.style("margin", "0");
-      slider.style("padding", panelH * 0.01 + "px 0");
-      slider.style("position", "absolute");
-      slider.style("z-index", "4");
-      if (settingKey) slider.attribute('data-setting', settingKey);
-      Object.entries(dataAttrs).forEach(([k, v]) => { if (v !== undefined && v !== null) slider.attribute(k, v); });
-      if (isAudio) slider.attribute('data-audio', '1');
-      slider.input(() => callback(slider.value()));
-      activeSettingElements.push(slider);
-      y += spacingY;
-      return ctx;
-    },
-    addCheckboxRow(name, state) {
-      const cb = createCheckbox(name, state);
-      const checkboxShift = Math.round(controlWidth * 0.06);
-      cb.position(controlX, y);
-      if (cb.elt && cb.elt.classList) cb.elt.classList.add('setting-checkbox');
-      cb.style("color", "white");
-      cb.style("font-size", (0.035 * height) + "px");
-      cb.style("transform", "scale(1.2)");
-      cb.style("transform-origin", "left center");
-      const checkboxInput = cb.elt?.querySelector('input[type="checkbox"]');
-      if (checkboxInput) {
-        const boxSize = Math.max(30, panelH * 0.055);
-        checkboxInput.style.width = boxSize + "px";
-        checkboxInput.style.height = boxSize + "px";
-        checkboxInput.style.transform = `translateX(-${checkboxShift}px)`;
-        checkboxInput.style.marginRight = Math.max(8, Math.round(controlWidth * 0.02)) + "px";
-        checkboxInput.style.transformOrigin = 'left center';
-      }
-      activeSettingElements.push(cb);
-      y += spacingY;
-      return ctx;
-    },
-    addSelectRow(name, opts, options = {}) {
-      const normalizedOptions = (opts || []).map((opt) => {
-        if (opt && typeof opt === 'object') {
-          return {
-            label: opt.label ?? opt.value ?? '',
-            value: opt.value ?? opt.label ?? ''
-          };
-        }
-        return { label: String(opt), value: String(opt) };
-      });
-      const lbl = createSettingLabel(name, labelX, y, controlX - labelX - 20);
-      activeSettingElements.push(lbl);
-      const sel = createSelect();
-      sel.position(controlX, y + SELECT_VERTICAL_NUDGE);
-      sel.style('width', controlWidth + 'px');
-      sel.style('height', (0.045 * panelH) + 'px');
-      sel.style('font-size', (0.035 * height) + 'px');
-      normalizedOptions.forEach(({ label, value }) => sel.option(label, value));
-      const initialValue = options.value ?? normalizedOptions[0]?.value;
-      if (initialValue !== undefined) {
-        try { sel.value(initialValue); } catch (e) {}
-      }
-      if (typeof options.onChange === 'function') {
-        sel.changed(() => options.onChange(sel.value()));
-      }
-      activeSettingElements.push(sel);
-      y += spacingY;
-      return ctx;
-    },
-    pushElement(el) {
-      activeSettingElements.push(el);
-      return ctx;
-    }
-  };
-  return ctx;
-}
+
 
 const CATEGORY_BUILDERS = {
   Audio: buildAudioSettings,
@@ -666,9 +584,19 @@ const CATEGORY_BUILDERS = {
 
 function buildAudioSettings(ctx) {
   ctx
-    .addSliderRow("Master Volume", 0, 100, masterVol * 100, v => { masterVol = v / 100; applyVolumes(); }, { isAudio: true, settingKey: 'masterVol' })
-    .addSliderRow("Music Volume", 0, 100, musicVol * 100, v => { musicVol = v / 100; applyVolumes(); }, { isAudio: true, settingKey: 'musicVol' })
-    .addSliderRow("SFX Volume", 0, 100, sfxVol * 100, v => { sfxVol = v / 100; }, { isAudio: true, settingKey: 'sfxVol' });
+    .addSliderRow("Master Volume", 0, 100, masterVol * 100, v => { 
+        masterVol = v / 100; 
+        if(typeof applyVolumes === 'function') applyVolumes();
+        if(gameMusic) gameMusic.setVolume(musicVol * masterVol); 
+    }, { isAudio: true })
+    .addSliderRow("Music Volume", 0, 100, musicVol * 100, v => { 
+        musicVol = v / 100; 
+        if(typeof applyVolumes === 'function') applyVolumes();
+        if(gameMusic) gameMusic.setVolume(musicVol * masterVol);
+    }, { isAudio: true })
+    .addSliderRow("SFX Volume", 0, 100, sfxVol * 100, v => { 
+        sfxVol = v / 100; 
+    }, { isAudio: true });
 }
 
 function buildGameplaySettings(ctx) {
@@ -676,54 +604,56 @@ function buildGameplaySettings(ctx) {
     .addCheckboxRow("Show Tutorials", true)
     .addCheckboxRow("Enable HUD", true)
     .addSelectRow("Difficulty", ["Easy", "Normal", "Hard"], {
-      value: getDifficultyLabel(difficultySetting),
+      value: (difficultySetting.charAt(0).toUpperCase() + difficultySetting.slice(1)),
       onChange: (val) => {
-        const normalized = normalizeDifficultyChoice(val);
-        if (normalized) difficultySetting = normalized;
+        const normalized = val.toLowerCase();
+        difficultySetting = normalized;
+        if(typeof setDifficulty === 'function') setDifficulty(normalized, { regenerate: false });
       }
     });
 }
 
 function buildControlsSettings(ctx) {
-  ctx
-    .addSliderRow("Sensitivity", 1, 10, 5, v => {})
-    .addCheckboxRow("Invert Y Axis", false);
+  ctx.addSliderRow("Sensitivity", 1, 10, 5, v => {})
+     .addCheckboxRow("Invert Y Axis", false);
 }
 
 function buildAccessibilitySettings(ctx) {
-  const { labelX, controlX, controlWidth, panelH, spacingY } = ctx.layout;
   ctx.addSelectRow("Color Mode", ["None", "Protanopia", "Deuteranopia", "Tritanopia"]);
-  const label = createSettingLabel("Text Size", labelX, ctx.y, controlX - labelX - 20);
-  ctx.pushElement(label);
-  const sizes = { Small: DEFAULT_SETTINGS.textSize - 20, Default: DEFAULT_SETTINGS.textSize, Big: DEFAULT_SETTINGS.textSize + 20 };
-  const btnWidth = controlWidth / 3.2;
-  let currentX = controlX;
-  Object.entries(sizes).forEach(([sizeLabel, sizeVal]) => {
-  const btn = makeSmallBtn(sizeLabel, currentX, ctx.y + TEXTSIZE_BUTTON_Y_OFFSET, btnWidth, panelH * 0.07, () => {
-      playClickSFX();
-      textSizeSetting = sizeVal;
-      adjustTextSize(sizeVal);
-      updateTextSizeButtonStyles();
-    });
-    btn.attribute('data-text-size-val', sizeVal);
-    ctx.pushElement(btn);
-    currentX += btnWidth + 15;
+  
+  // Custom buttons for Text Size
+  const { labelX, controlX, controlWidth, panelH, spacingY } = ctx.layout;
+  
+  // Create a Label manually
+  const lbl = createDiv("Text Size");
+  lbl.class('setting-label');
+  lbl.position(labelX, ctx.y);
+  lbl.style('width', (controlX - labelX - 20) + 'px');
+  lbl.style('text-align', 'right');
+  lbl.style('color', 'white');
+  lbl.style('font-size', '30px');
+  lbl.style('z-index', '20005');
+  ctx.pushElement(lbl);
+
+  // Create Buttons
+  const sizes = ["Small", "Default", "Big"];
+  const btnW = (controlWidth / 3) - 10;
+  let currX = controlX;
+  
+  sizes.forEach(size => {
+      const btn = createButton(size);
+      btn.position(currX, ctx.y);
+      btn.size(btnW, 50);
+      styleButton(btn);
+      btn.style('font-size', '24px');
+      btn.style('background', '#333');
+      btn.style('z-index', '20005');
+      btn.mousePressed(() => { console.log("Text size:", size); });
+      ctx.pushElement(btn);
+      currX += btnW + 10;
   });
-  updateTextSizeButtonStyles();
-  ctx.y += spacingY;
-  const actionBtnWidth = controlWidth * 0.42;
-  const actionBtnHeight = panelH * 0.09;
-  const actionGap = controlWidth * 0.06;
-  const applyX = controlX;
-  const resetX = controlX + actionBtnWidth + actionGap;
-  const actionY = ctx.y + TEXTSIZE_BUTTON_Y_OFFSET;
-  const applyBG = createBgImg("assets/3-GUI/Button BG.png", applyX, actionY, actionBtnWidth, actionBtnHeight, '3');
-  const applyBtn = makeSmallBtn("💾 Apply", applyX, actionY, actionBtnWidth, actionBtnHeight, saveAccessibilitySettings);
-  ctx.pushElement(applyBG).pushElement(applyBtn);
-  const resetBG = createBgImg("assets/3-GUI/Button BG.png", resetX, actionY, actionBtnWidth, actionBtnHeight, '3');
-  const resetBtn = makeSmallBtn("Default", resetX, actionY, actionBtnWidth, actionBtnHeight, resetDefaults);
-  ctx.pushElement(resetBG).pushElement(resetBtn);
-  ctx.y += spacingY;
+  
+  ctx.y += spacingY + 20; // Add extra space
 }
 
 function buildLanguageSettings(ctx) {

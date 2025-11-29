@@ -7,13 +7,6 @@ let mapLoadComplete = false;
 let showLoadingOverlay = true;
 let overlayMessage = 'Loading map...';
 
-
-let overlayShownAt = 0; 
-const MIN_OVERLAY_MS = 3000; 
-let overlayHideTimeoutId = null; 
-let _overlayPreviouslyVisible = false;
-let overlayProgress = 0; 
-
 let inGameMenuVisible = false;
 let inGameMenuButtonRects = []; 
 let inGameMenuHovered = null; 
@@ -101,41 +94,6 @@ function ensureLoadingOverlayDom() {
     sub.style.color = '#ddd';
     inner.appendChild(msg);
     inner.appendChild(sub);
-
-    
-    const barContainer = document.createElement('div');
-    barContainer.className = 'gd-progress-container';
-    barContainer.style.width = '80%';
-    barContainer.style.maxWidth = '720px';
-    barContainer.style.height = '18px';
-    barContainer.style.background = '#333';
-    barContainer.style.border = '2px solid #555';
-    barContainer.style.borderRadius = '10px';
-    barContainer.style.overflow = 'hidden';
-    barContainer.style.margin = '18px auto 0 auto';
-    barContainer.style.position = 'relative';
-
-    const barFill = document.createElement('div');
-    barFill.className = 'gd-progress-fill';
-    barFill.style.height = '100%';
-    barFill.style.width = '0%';
-    barFill.style.background = 'linear-gradient(90deg, #ff8c00, #ffd700)';
-    barFill.style.transition = 'width 180ms linear';
-
-    const barPercent = document.createElement('div');
-    barPercent.className = 'gd-progress-percent';
-    barPercent.style.position = 'absolute';
-    barPercent.style.left = '50%';
-    barPercent.style.top = '50%';
-    barPercent.style.transform = 'translate(-50%, -50%)';
-    barPercent.style.color = '#fff';
-    barPercent.style.fontSize = '14px';
-    barPercent.style.textShadow = '1px 1px 0 #000';
-    barPercent.innerText = '';
-
-    barContainer.appendChild(barFill);
-    barContainer.appendChild(barPercent);
-    inner.appendChild(barContainer);
     el.appendChild(inner);
     document.body.appendChild(el);
     return el;
@@ -442,53 +400,13 @@ function updateLoadingOverlayDom() {
   try {
     const el = (typeof document !== 'undefined') ? document.getElementById('gd-loading-overlay') : null;
     if (!el) return;
-    if (showLoadingOverlay) {
-      el.style.display = 'flex';
-      
-      if (!_overlayPreviouslyVisible) {
-        overlayShownAt = Date.now();
-        
-        try { if (overlayHideTimeoutId) { clearTimeout(overlayHideTimeoutId); overlayHideTimeoutId = null; } } catch (e) {}
-      }
-      _overlayPreviouslyVisible = true;
-    } else {
-      el.style.display = 'none';
-      _overlayPreviouslyVisible = false;
-    }
-
+    el.style.display = showLoadingOverlay ? 'flex' : 'none';
     const msg = el.querySelector && el.querySelector('.message');
     if (msg) msg.innerText = overlayMessage || 'Loading...';
-    
-    try {
-      const fill = el.querySelector && el.querySelector('.gd-progress-fill');
-      const pct = el.querySelector && el.querySelector('.gd-progress-percent');
-      const p = Math.max(0, Math.min(100, Number(overlayProgress) || 0));
-      if (fill) fill.style.width = p + '%';
-      if (pct) pct.innerText = (p > 0 ? (p + '%') : '');
-    } catch (e) {}
   } catch (e) {}
 }
 
 try { ensureLoadingOverlayDom(); updateLoadingOverlayDom(); } catch (e) {}
-
-function _maybeHideLoadingOverlay() {
-  try {
-    const now = Date.now();
-    const elapsed = now - (overlayShownAt || 0);
-    const remaining = Math.max(0, MIN_OVERLAY_MS - elapsed);
-    if (remaining > 0) {
-      if (!overlayHideTimeoutId) {
-        overlayHideTimeoutId = setTimeout(() => {
-          overlayHideTimeoutId = null;
-          try { _maybeHideLoadingOverlay(); } catch (e) {}
-        }, remaining);
-      }
-      return;
-    }
-    
-    try { _maybeHideLoadingOverlay(); } catch (e) {}
-  } catch (e) {}
-}
 
 let gameMusic;
 let masterVol = 0.8;
@@ -683,7 +601,7 @@ function applyLoadedMap(obj) {
     createMapImage();
     redraw();
     try { mapLoadComplete = true; } catch (e) {}
-    try { _maybeHideLoadingOverlay(); } catch (e) {}
+    try { showLoadingOverlay = false; } catch (e) {}
     return true;
   } catch (err) {
     console.warn('[game] applyLoadedMap error', err);
@@ -2032,7 +1950,7 @@ function setup() {
     }
   } catch (e) { console.warn('[game] loadMapFromStorage/Server init failed', e); serverFetchPromise = Promise.resolve(false); }
 
-  
+  // --- REPLACE THE ENTIRE AssetTracker.waitReady BLOCK WITH THIS ---
   AssetTracker.waitReady(3500).then((ready) => {
     if (ready) {
       console.log('[game] assets loaded before map init');
@@ -2041,7 +1959,7 @@ function setup() {
       try { showToast('Asset load timeout — processing map...', 'warn', 3000); } catch (e) {}
     }
 
-    
+    // Helper function to handle missing map
     const ensureGameStarts = () => {
         console.log('[game] No saved map found (or load failed). Auto-generating new map...');
         generateMap();
@@ -2052,26 +1970,24 @@ function setup() {
         try {
           loadedFromServer = !!serverLoaded;
           
-          
+          // If server didn't have a map, try local storage
           if (!loadedFromServer) {
             loadedFromStorage = !!loadMapFromStorage();
           }
 
-          
-         if (!loadedFromStorage && !loadedFromServer) {
-            
-            console.log('[game] No saved map found. Auto-generating new map...');
-            generateMap();
+          // If NEITHER had a map, generate one automatically
+          if (!loadedFromStorage && !loadedFromServer) {
+             ensureGameStarts();
           } else {
-            
-            try { createMapImage(); redraw(); } catch (e) { console.warn('[game] failed to recreate mapImage after assets ready', e); }
+            // We found a map! Draw it.
+            try { createMapImage(); redraw(); } catch (e) { console.warn('[game] failed to recreate mapImage', e); }
           }
         } catch (e) { 
           console.warn('[game] error in map load logic, falling back to auto-gen', e);
           ensureGameStarts();
         }
       }).catch((e) => {
-        
+        // If the server check completely crashed/failed, we still need to start the game!
         console.warn('[game] serverFetchPromise failed, checking storage...', e);
         if (!loadMapFromStorage()) {
            ensureGameStarts();
@@ -2085,7 +2001,7 @@ function setup() {
     }
     
     if (!ready) {
-      
+      // If assets were late, register a callback to refresh the map once they arrive
       try {
         AssetTracker.onReady(() => {
           try {
@@ -2097,10 +2013,7 @@ function setup() {
       } catch (e) {}
     }
   });
-  
-  
-  try { overlayProgress = 100; updateLoadingOverlayDom(); } catch (e) {}
-  try { _maybeHideLoadingOverlay(); } catch (e) {}
+  // --- END REPLACEMENT ---
   if (gameMusic) {
     gameMusic.setVolume(musicVol * masterVol);
   }
@@ -2142,8 +2055,8 @@ function draw() {
   }
 
   if (showLoadingOverlay) {
-    background(0); 
-    return;        
+    background(0); // Draws a solid black background
+    return;        // Stops the game from drawing anything else underneath
   }
   
   if (playerPosition) {
@@ -2897,6 +2810,10 @@ function drawPlayer() {
 }
 
 function getCellSizeSpeedScale() {
+  const BASE_CELL_SIZE = 32;
+  if (typeof cellSize !== 'number' || cellSize <= 0) return 1;
+  return cellSize / BASE_CELL_SIZE;
+}
 
 function hideCategoryButtons() {
   categoryBackgrounds.forEach(e => e && e.hide());
@@ -3069,13 +2986,9 @@ function createSettingsContext({ labelX, controlX, controlWidth, panelH, startY,
   return ctx;
 }
 
-const CATEGORY_BUILDERS = {
-  Audio: buildAudioSettings,
-  Gameplay: buildGameplaySettings,
-  Controls: buildControlsSettings,
-  Accessibility: buildAccessibilitySettings,
-  Language: buildLanguageSettings
-};
+
+
+
 
 function buildAudioSettings(ctx) {
   ctx
@@ -3310,10 +3223,12 @@ function ensureLoopFallbackBuffer() {
 }
 
 
+function getCellSizeSpeedScale() {
   const BASE_CELL_SIZE = 32;
   if (typeof cellSize !== 'number' || cellSize <= 0) return 1;
   return cellSize / BASE_CELL_SIZE;
 }
+
 
 function getActiveMoveDurationMs() {
   const base = sprintActive ? SPRINT_MOVE_DURATION_MS : BASE_MOVE_DURATION_MS;
@@ -3504,22 +3419,23 @@ window.addEventListener('keydown', (ev) => {
   }
   if (k === 'P') {
     try {
-      
+      // 1. Turn on the loading screen visually
       showLoadingOverlay = true;
       overlayMessage = 'Generating New Map...';
       updateLoadingOverlayDom();
 
-      
+      // 2. Wait 100ms so the screen actually turns black, THEN generate
       setTimeout(() => {
         console.log('[game] key P pressed — generating new map');
         nextGenerateIsManual = true;
         generateMap();
-        
+        // generateMap will handle turning the overlay off when it's done
       }, 100);
 
-      } catch (e) {
+    } catch (e) {
       console.warn('[game] generateMap() failed from key press', e);
-      try { _maybeHideLoadingOverlay(); } catch (e) {}
+      showLoadingOverlay = false; // Turn off if it fails
+      updateLoadingOverlayDom();
     }
     return;
   }
@@ -3694,7 +3610,6 @@ function createMapImage() {
   console.log(`[createMapImage] creating graphics ${w}x${h} (logical: ${logicalW}x${logicalH})`);
   mapImage = createGraphics(w, h);
   mapImage.noSmooth();
-  try { overlayProgress = 50; updateLoadingOverlayDom(); } catch (e) {}
   const useSprites = showTextures && spritesheet && spritesheet.width > 1;
   console.log(`[createMapImage] useSprites=${useSprites}, spritesheet.width=${spritesheet ? spritesheet.width : 'null'}`);
   if (showTextures && !useSprites) {
@@ -3807,15 +3722,7 @@ function createMapImage() {
         } catch (e) {}
       }
     }
-    
-    try {
-      if (ly % Math.max(1, Math.floor(logicalH / 12)) === 0) {
-        overlayProgress = 50 + Math.floor((ly / logicalH) * 40); 
-        updateLoadingOverlayDom();
-      }
-    } catch (e) {}
   }
-  try { overlayProgress = 95; updateLoadingOverlayDom(); } catch (e) {}
 
   if (Array.isArray(treeObjects) && treeObjects.length) {
     for (const t of treeObjects) {
@@ -3977,8 +3884,54 @@ function createMapImage() {
 
   
   
-  
+  try {
+    if (mapImage && typeof mapImage.loadPixels === 'function') {
+      mapImage.loadPixels();
+      const mw = mapImage.width || 0;
+      const mh = mapImage.height || 0;
+      const findings = [];
+      const maxFind = 128;
+      for (let yy = 0; yy < mh; yy++) {
+        if (findings.length >= maxFind) break;
+        for (let xx = 0; xx < mw; xx++) {
+          const idx = 4 * (yy * mw + xx);
+          const r = mapImage.pixels[idx];
+          const g = mapImage.pixels[idx+1];
+          const b = mapImage.pixels[idx+2];
+          if (isBrownPixel(r, g, b)) {
+            findings.push({ x: xx, y: yy, r, g, b, tx: Math.floor(xx / (cellSize || 32)), ty: Math.floor(yy / (cellSize || 32)) });
+            if (findings.length >= maxFind) break;
+          }
+        }
+      }
+      if (findings.length) {
+        console.warn('[createMapImage] detected brown/orange pixels in mapImage - running diagnostics/fixes count=', findings.length);
+        
+        try { brownDebugPositions = findings.map(f => ({ x: f.x, y: f.y })); } catch (e) { brownDebugPositions = findings.slice(0,0); }
+        try { for (const f of findings.slice(0, 24)) { try { diagnoseMapPixel(f.x, f.y); } catch (e) {} } } catch (e) {}
 
+        
+        let totalFixed = 0;
+        try {
+          if (TILE_IMAGES && TILE_IMAGES['tile_1']) {
+            try { totalFixed += cleanImageBrown(TILE_IMAGES['tile_1']); } catch (e) {}
+          }
+          if (HILL_ASSETS) {
+            for (const k in HILL_ASSETS) {
+              if (!Object.prototype.hasOwnProperty.call(HILL_ASSETS, k)) continue;
+              try { totalFixed += cleanImageBrown(HILL_ASSETS[k]); } catch (e) {}
+            }
+          }
+        } catch (e) {}
+
+        if (totalFixed > 0) {
+          console.log('[createMapImage] cleaned brown pixels from source assets total=', totalFixed, ' — recomposing map');
+          try { setTimeout(() => { try { createMapImage(); } catch (e) {} }, 40); } catch (e) {}
+        }
+      }
+    }
+  } catch (e) { console.warn('[createMapImage] brown-pixel diagnose/fix failed', e); }
+}
 
 function loadMapFromStorage() {
   if (isNewGame) {
@@ -4025,7 +3978,9 @@ function loadMapFromStorage() {
     }
     logicalW = Number(obj.logicalW) || Math.ceil((virtualW || W) / cellSize);
     logicalH = Number(obj.logicalH) || Math.ceil((virtualH || H) / cellSize);
-    
+    console.log(`[game] loaded map from storage. logicalW=${logicalW}, logicalH=${logicalH}, mapStates.length=${obj.mapStates.length}`);
+    const nonZero = obj.mapStates.filter(x => x !== 0).length;
+    console.log(`[game] mapStates has ${nonZero} non-zero tiles out of ${obj.mapStates.length}`);
     if (obj.cellSize && Number(obj.cellSize) > 0) {
       try { cellSize = Number(obj.cellSize); } catch (e) { }
     }
@@ -4051,6 +4006,7 @@ function loadMapFromStorage() {
     createMapImage();
     redraw();
     try { showToast('Loaded saved map', 'info', 2200); } catch (e) {}
+    console.log('[game] loadMapFromStorage: loaded map (logicalW,logicalH)=', logicalW, logicalH);
     try { mapLoadComplete = true; } catch (e) {}
     try { showLoadingOverlay = false; } catch (e) {}
     return true;
@@ -4059,8 +4015,6 @@ function loadMapFromStorage() {
     return false;
   }
 }
-}
-
 
 function carveRivers(map, w, h, opts) {
   const { clearStartX, clearEndX, clearStartY, clearEndY } = opts;
@@ -4345,7 +4299,6 @@ function generateMap() {
   try {
     showLoadingOverlay = true;
     overlayMessage = 'Generating new map...';
-    try { overlayProgress = 5; updateLoadingOverlayDom(); } catch (e) {}
   } catch (e) {}
 
   logicalW = Math.ceil((virtualW || W) / cellSize);
@@ -4354,7 +4307,7 @@ function generateMap() {
   mapStates = new Uint8Array(logicalW * logicalH);
   terrainLayer = new Uint8Array(logicalW * logicalH);
 
-  
+  // --- Helper 1: Calculate the center clearing ---
   function computeClearArea() {
     const centerX = logicalW / 2;
     const centerY = logicalH / 2;
@@ -4373,7 +4326,7 @@ function generateMap() {
     };
   }
 
-  
+  // --- Helper 2: Apply noise for grass/forest distribution ---
   function applyNoiseTerrain(centerX, centerY, baseClearWidth, baseClearHeight) {
     const lowFreqScale = 0.07;
     const highFreqScale = 0.2;
@@ -4400,7 +4353,7 @@ function generateMap() {
     }
   }
 
-  
+  // --- Helper 3: Handle Rivers ---
   function postProcessRiversAndClearArea(clearStartX, clearEndX, clearStartY, clearEndY) {
     const RIVER_TILE = (typeof TILE_TYPES !== 'undefined' && TILE_TYPES.RIVER) ? TILE_TYPES.RIVER : null;
 
@@ -4472,9 +4425,9 @@ function generateMap() {
     };
   }
 
-  
+  // --- Helper 4: Remove Unreachable Areas (UPDATED) ---
   function pruneUnreachable(startX, startY) {
-    
+    // Safety: ensure spawn isn't solid before we start
     const startIdx = startY * logicalW + startX;
     if (isSolid(mapStates[startIdx])) {
       console.warn("Prune warning: Spawn point is solid.");
@@ -4485,7 +4438,7 @@ function generateMap() {
     const visited = new Set([`${startX},${startY}`]);
     let head = 0;
 
-    
+    // 8-Way Directions (Horizontal, Vertical, Diagonal)
     const dirs = [
       { dx: 0, dy: -1 }, { dx: 1, dy: -1 }, { dx: 1, dy: 0 }, { dx: 1, dy: 1 },
       { dx: 0, dy: 1 },  { dx: -1, dy: 1 }, { dx: -1, dy: 0 }, { dx: -1, dy: -1 }
@@ -4498,12 +4451,12 @@ function generateMap() {
         const nx = x + d.dx;
         const ny = y + d.dy;
 
-        
+        // Boundary check
         if (nx >= 0 && nx < logicalW && ny >= 0 && ny < logicalH) {
           const key = `${nx},${ny}`;
           const idx = ny * logicalW + nx;
           
-          
+          // If not visited AND NOT SOLID, we can walk there
           if (!visited.has(key) && !isSolid(mapStates[idx])) {
             visited.add(key);
             q.push({ x: nx, y: ny });
@@ -4512,7 +4465,7 @@ function generateMap() {
       }
     }
 
-    
+    // Replace ONLY unreachable GRASS with FOREST
     for (let i = 0; i < mapStates.length; i++) {
       const x = i % logicalW;
       const y = Math.floor(i / logicalW);
@@ -4524,22 +4477,22 @@ function generateMap() {
     }
   }
 
-  
+  // --- EXECUTION START ---
 
   const clearArea = computeClearArea();
   applyNoiseTerrain(clearArea.centerX, clearArea.centerY, clearArea.baseClearWidth, clearArea.baseClearHeight);
   
-  
+  // Create rivers and get spawn point
   const spawn = postProcessRiversAndClearArea(clearArea.clearStartX, clearArea.clearEndX, clearArea.clearStartY, clearArea.clearEndY);
 
-  
+  // 1. PRUNE FIRST (Removes unreachable grass before hills are made)
   pruneUnreachable(spawn.spawnX, spawn.spawnY);
 
-  
+  // 2. GENERATE HILLS (Decorate the valid map)
   generateHills(mapStates, logicalW, logicalH);
 
 
-  
+  // --- Finalization ---
   terrainLayer = mapStates.slice();
   counts = {};
   for (let i = 0; i < mapStates.length; i++) counts[mapStates[i]] = (counts[mapStates[i]] || 0) + 1;
@@ -4556,7 +4509,6 @@ function generateMap() {
   renderTargetY = renderY;
   isMoving = false;
 
-  try { overlayProgress = 45; updateLoadingOverlayDom(); } catch (e) {}
   createMapImage();
 
   treeObjects = [];
@@ -4574,11 +4526,9 @@ function generateMap() {
         }
       }
     }
-    try { overlayProgress = 70; updateLoadingOverlayDom(); } catch (e) {}
     createMapImage();
   }
 
-  try { overlayProgress = 90; updateLoadingOverlayDom(); } catch (e) {}
   redraw();
 
   try {
@@ -4595,7 +4545,7 @@ function generateMap() {
 
   try {
     mapLoadComplete = true;
-    try { _maybeHideLoadingOverlay(); } catch (e) {}
+    showLoadingOverlay = false;
   } catch (e) {}
 }
 
@@ -4969,6 +4919,7 @@ function keyPressed() {
     jumpFrame = 0;
     jumpTimer = 0;
 
+    
     try {
       const nowA = (typeof keyIsDown === 'function') ? keyIsDown(65) : false;
       const nowD = (typeof keyIsDown === 'function') ? keyIsDown(68) : false;
@@ -5040,6 +4991,7 @@ function keyPressed() {
     return;
   }
 
+  
   if (key === 'o' || key === 'O') {
     try {
       console.log('[game] debug key O pressed — forcing inGameMenuVisible = true');
@@ -5048,6 +5000,8 @@ function keyPressed() {
     return;
   }
 }
+
+
 try {
   window.addEventListener('keydown', (e) => {
     try {
@@ -5056,6 +5010,7 @@ try {
         const active = document && document.activeElement;
         if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) return;
 
+        
         try {
           const ig = (typeof document !== 'undefined') ? document.getElementById('gd-in-game-settings') : null;
           if (ig) {
@@ -5065,6 +5020,7 @@ try {
           }
         } catch (err) {  }
 
+        
         try {
           inGameMenuVisible = !inGameMenuVisible;
           e.preventDefault();
@@ -5076,27 +5032,112 @@ try {
   }, false);
 } catch (e) { console.warn('[game] failed to attach global Escape handler', e); }
 
-
-
-function getColorForState(state) { 
-  if (typeof COLORS !== 'undefined' && COLORS[state]) {
-    return COLORS[state];
-  }
-  return [255, 0, 255]; 
-}
-
-function isBrownPixel(r, g, b, tolerance = 10, strict = false) {
-  return (r > 60 && r < 180 && g > 30 && g < 120 && b < 80);
-}
-
+// --- HELPER FUNCTIONS TO FIX CRASHES ---
 
 function getColorForState(state) {
+  // Uses the COLORS object defined earlier in your code
   if (typeof COLORS !== 'undefined' && COLORS[state]) {
     return COLORS[state];
   }
+  // Fallback default color (Magenta to make it obvious if something is missing)
   return [255, 0, 255]; 
 }
 
 function isBrownPixel(r, g, b, tolerance = 10, strict = false) {
+  // Simple check for "brown-ish" pixels usually found in assets
+  // Adjust these values if your specific assets need different tuning
   return (r > 60 && r < 180 && g > 30 && g < 120 && b < 80);
+}
+
+function ensureLoadingOverlayDom() {
+  try {
+    if (typeof document === 'undefined') return null;
+    
+    if (!document.body) return null; // Safety check
+
+    let el = document.getElementById('gd-loading-overlay');
+    if (el) return el;
+
+    // --- Create the Main Container ---
+    el = document.createElement('div');
+    el.id = 'gd-loading-overlay';
+    el.style.position = 'fixed';
+    el.style.left = '0';
+    el.style.top = '0';
+    el.style.width = '100%';
+    el.style.height = '100%';
+    el.style.display = 'flex';
+    el.style.alignItems = 'center';
+    el.style.justifyContent = 'center';
+    el.style.zIndex = '2147483647';
+    el.style.background = 'rgba(0,0,0,0.95)'; // Darker background
+    el.style.color = '#fff';
+    el.style.fontFamily = 'sans-serif';
+    el.style.flexDirection = 'column'; // Stack text and bar vertically
+
+    // --- Inner Container ---
+    const inner = document.createElement('div');
+    inner.className = 'gd-loading-inner';
+    inner.style.textAlign = 'center';
+    inner.style.maxWidth = '600px';
+    inner.style.width = '80%';
+
+    // --- The Main Message ---
+    const msg = document.createElement('div');
+    msg.className = 'message';
+    msg.innerText = overlayMessage || 'Loading...';
+    msg.style.color = '#ffd700'; // Gold color
+    msg.style.fontWeight = 'bold';
+    msg.style.fontSize = '40px'; 
+    msg.style.marginBottom = '20px';
+    msg.style.textShadow = '0 2px 10px rgba(255, 215, 0, 0.4)';
+
+    // --- The Progress Bar Container ---
+    const barContainer = document.createElement('div');
+    barContainer.style.width = '100%';
+    barContainer.style.height = '12px';
+    barContainer.style.background = '#333';
+    barContainer.style.borderRadius = '10px';
+    barContainer.style.overflow = 'hidden';
+    barContainer.style.boxShadow = 'inset 0 1px 3px rgba(0,0,0,0.5)';
+    barContainer.style.position = 'relative';
+
+    // --- The Moving Bar (Animation) ---
+    const barFill = document.createElement('div');
+    barFill.id = 'gd-loading-bar-fill';
+    barFill.style.width = '30%'; // Initial width
+    barFill.style.height = '100%';
+    barFill.style.background = 'linear-gradient(90deg, #ff8c00, #ffd700)';
+    barFill.style.borderRadius = '10px';
+    barFill.style.transition = 'width 0.2s';
+    
+    // Add a simple animation pulse
+    const styleSheet = document.createElement("style");
+    styleSheet.innerText = `
+      @keyframes gd-load-pulse {
+        0% { width: 10%; margin-left: 0%; }
+        50% { width: 60%; margin-left: 20%; }
+        100% { width: 10%; margin-left: 90%; }
+      }
+    `;
+    document.head.appendChild(styleSheet);
+    barFill.style.animation = "gd-load-pulse 1.5s infinite ease-in-out alternate";
+
+    // --- Subtitle ---
+    const sub = document.createElement('div');
+    sub.className = 'sub';
+    sub.style.marginTop = '15px';
+    sub.style.fontSize = '18px';
+    sub.innerText = 'Please wait...';
+    sub.style.color = '#aaa';
+
+    // --- Assemble ---
+    barContainer.appendChild(barFill);
+    inner.appendChild(msg);
+    inner.appendChild(barContainer);
+    inner.appendChild(sub);
+    el.appendChild(inner);
+    document.body.appendChild(el);
+    return el;
+  } catch (e) { return null; }
 }
