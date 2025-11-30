@@ -633,8 +633,8 @@ function createSettingsContext(layout) {
       // --- HEIGHT FIX IS HERE ---
       sel.position(this.layout.controlX, this.y - 10); // Moved up slightly
       sel.size(this.layout.controlWidth, 70);          // Increased height to 70px
-      sel.style('height', '70px');                     // Force CSS height
-      sel.style('line-height', '70px');                // Center text vertically
+      sel.style('height', '100px');                     // Force CSS height
+      sel.style('line-height', '100px');                // Center text vertically
       sel.style('z-index', '20000');
       sel.style('font-size', '28px');                  // Large clear font
       sel.style('padding-left', '15px');               // Space from left edge
@@ -707,41 +707,68 @@ function buildControlsSettings(ctx) {
 }
 
 function buildAccessibilitySettings(ctx) {
+  // 1. Color Mode Dropdown
   ctx.addSelectRow("Color Mode", ["None", "Protanopia", "Deuteranopia", "Tritanopia"]);
   
-  // Custom buttons for Text Size
+  // 2. Custom Buttons for Text Size
   const { labelX, controlX, controlWidth, panelH, spacingY } = ctx.layout;
   
-  // Create a Label manually
+  // Create "Text Size" Label manually
   const lbl = createDiv("Text Size");
   lbl.class('setting-label');
-  lbl.position(labelX, ctx.y);
-  lbl.style('width', (controlX - labelX - 20) + 'px');
+  // Position it slightly lower (+25) to align with the center of the HUGE buttons
+  lbl.position(labelX - 50, ctx.y + 25);
+  lbl.style('width', '350px');
   lbl.style('text-align', 'right');
   lbl.style('color', 'white');
-  lbl.style('font-size', '30px');
+  lbl.style('font-size', (0.035 * height) + 'px');
   lbl.style('z-index', '20005');
+  lbl.style('pointer-events', 'none');
   ctx.pushElement(lbl);
 
-  // Create Buttons
-  const sizes = ["Small", "Default", "Big"];
-  const btnW = (controlWidth / 3) - 10;
+  // Button Configuration
+  const sizes = [
+    { label: "Small", val: 50 },
+    { label: "Default", val: 75 }, 
+    { label: "Big", val: 100 }
+  ];
+  
+  const gap = 15; // Little more space between them
+  const btnW = (controlWidth - (gap * (sizes.length - 1))) / sizes.length;
+  const btnH = 90; // MASSIVE BUTTONS (90px)
+  
   let currX = controlX;
   
-  sizes.forEach(size => {
-      const btn = createButton(size);
+  sizes.forEach(item => {
+      const btn = createButton(item.label);
       btn.position(currX, ctx.y);
-      btn.size(btnW, 50);
+      btn.size(btnW, btnH);
+      
+      // Styling
       styleButton(btn);
-      btn.style('font-size', '24px');
-      btn.style('background', '#333');
+      btn.style('background', '#333'); 
+      btn.style('border', '3px solid #555'); // Thicker border
+      btn.style('border-radius', '12px');    // Rounder corners
+      btn.style('font-size', '32px');        // Bigger text
+      btn.style('font-weight', 'bold');      // Bold text
       btn.style('z-index', '20005');
-      btn.mousePressed(() => { console.log("Text size:", size); });
+      
+      btn.attribute('data-text-size-val', item.val);
+
+      btn.mousePressed(() => { 
+        playClickSFX();
+        textSizeSetting = item.val;
+        applyCurrentTextSize();
+        saveAllSettings();
+      });
+      
       ctx.pushElement(btn);
-      currX += btnW + 10;
+      currX += btnW + gap;
   });
   
-  ctx.y += spacingY + 20; // Add extra space
+  setTimeout(updateTextSizeButtonStyles, 50);
+
+  ctx.y += spacingY + 40; // Add extra space below for the next row
 }
 
 function buildLanguageSettings(ctx) {
