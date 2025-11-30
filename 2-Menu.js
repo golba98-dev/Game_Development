@@ -594,7 +594,7 @@ function createSettingsContext(layout) {
       this.pushElement(createSettingLabel(labelText, this.layout.labelX, this.y));
 
       const slider = createSlider(min, max, currentVal);
-      // Move slider down (+20) to align with text center
+
       slider.position(this.layout.controlX, this.y + 20); 
       slider.style('width', this.layout.controlWidth + 'px');
       slider.style('z-index', '20000');
@@ -614,10 +614,10 @@ function createSettingsContext(layout) {
       this.pushElement(createSettingLabel(labelText, this.layout.labelX, this.y));
 
       const chk = createCheckbox('', isChecked);
-      // Move checkbox down (+10)
+
       chk.position(this.layout.controlX, this.y + 10); 
       chk.style('z-index', '20000');
-      // Force the class just in case, though the CSS now targets input[type=checkbox] globally
+ 
       if(chk.elt) chk.elt.classList.add('setting-checkbox');
 
       if (onChange) chk.changed(() => onChange(chk.checked()));
@@ -708,17 +708,15 @@ function buildControlsSettings(ctx) {
 }
 
 function buildAccessibilitySettings(ctx) {
-  // 1. Color Mode Dropdown
+  // 1. Color Mode
   ctx.addSelectRow("Color Mode", ["None", "Protanopia", "Deuteranopia", "Tritanopia"]);
   
-  // 2. Custom Buttons for Text Size
+  // 2. Custom Buttons
   const { labelX, controlX, controlWidth, panelH, spacingY } = ctx.layout;
   
-  // Create "Text Size" Label manually
   const lbl = createDiv("Text Size");
   lbl.class('setting-label');
-  // Position it slightly lower (+25) to align with the center of the HUGE buttons
-  lbl.position(labelX - 50, ctx.y + 25);
+  lbl.position(labelX - 50, ctx.y + 30);
   lbl.style('width', '350px');
   lbl.style('text-align', 'right');
   lbl.style('color', 'white');
@@ -727,16 +725,17 @@ function buildAccessibilitySettings(ctx) {
   lbl.style('pointer-events', 'none');
   ctx.pushElement(lbl);
 
-  // Button Configuration
   const sizes = [
     { label: "Small", val: 50 },
     { label: "Default", val: 75 }, 
     { label: "Big", val: 100 }
   ];
   
-  const gap = 15; // Little more space between them
+  const gap = 15;
   const btnW = (controlWidth - (gap * (sizes.length - 1))) / sizes.length;
-  const btnH = 90; // MASSIVE BUTTONS (90px)
+  
+  // --- MASSIVE BUTTON HEIGHT ---
+  const btnH = 100; 
   
   let currX = controlX;
   
@@ -745,13 +744,12 @@ function buildAccessibilitySettings(ctx) {
       btn.position(currX, ctx.y);
       btn.size(btnW, btnH);
       
-      // Styling
       styleButton(btn);
       btn.style('background', '#333'); 
-      btn.style('border', '3px solid #555'); // Thicker border
-      btn.style('border-radius', '12px');    // Rounder corners
-      btn.style('font-size', '32px');        // Bigger text
-      btn.style('font-weight', 'bold');      // Bold text
+      btn.style('border', '4px solid #555'); 
+      btn.style('border-radius', '15px');    
+      btn.style('font-size', '36px');        // Huge Text
+      btn.style('font-weight', 'bold');      
       btn.style('z-index', '20005');
       
       btn.attribute('data-text-size-val', item.val);
@@ -768,8 +766,7 @@ function buildAccessibilitySettings(ctx) {
   });
   
   setTimeout(updateTextSizeButtonStyles, 50);
-
-  ctx.y += spacingY + 40; // Add extra space below for the next row
+  ctx.y += spacingY + 50; 
 }
 
 function buildLanguageSettings(ctx) {
@@ -1179,77 +1176,74 @@ function injectCustomStyles() {
     }
 
     /* ============================
-       1. CHUNKY SLIDER STYLES
+       1. MASSIVE SLIDER HANDLE
        ============================ */
     input[type="range"] {
-      -webkit-appearance: none;  /* Remove default styling */
+      -webkit-appearance: none; 
       width: 100%;
       background: transparent;
       margin: 10px 0;
     }
 
-    /* The Track (Background Bar) */
+    /* The Track */
     input[type="range"]::-webkit-slider-runnable-track {
       width: 100%;
-      height: 24px !important;    /* MUCH THICKER NOW */
+      height: 30px !important;    /* Thicker Track */
       cursor: pointer;
       background: #222;
       border: 3px solid #555;
-      border-radius: 12px;
+      border-radius: 15px;
     }
 
-    /* The Thumb (The draggable square) */
+    /* The Handle (Thumb) - THE BUTTON YOU DRAG */
     input[type="range"]::-webkit-slider-thumb {
       -webkit-appearance: none;
-      height: 45px !important;    /* HUGE HANDLE */
-      width: 30px !important;     /* WIDE HANDLE */
-      background: #ffcc00;        /* Gold Color */
-      border: 3px solid white;
-      border-radius: 6px;
+      height: 55px !important;    /* GIANT HEIGHT */
+      width: 55px !important;     /* GIANT WIDTH */
+      background: #ffcc00;        
+      border: 4px solid white;
+      border-radius: 10px;        /* Slightly rounded square */
       cursor: pointer;
-      margin-top: -14px;          /* Centers the thumb vertically on the track */
-      box-shadow: 0 0 10px rgba(0,0,0,0.5);
+      margin-top: -16px;          /* Centers it on the track */
+      box-shadow: 0 0 15px rgba(0,0,0,0.8);
+      z-index: 20002;
+      position: relative;
     }
 
     /* ============================
-       2. CHECKBOX VISIBILITY FIX
+       2. CHECKBOX
        ============================ */
-    /* Target ALL checkboxes to ensure we don't miss it */
     input[type="checkbox"] {
       appearance: none;
       -webkit-appearance: none;
-      width: 50px !important;
-      height: 50px !important;
-      background-color: #333; /* Dark Grey when unchecked */
+      width: 60px !important;   /* Made even bigger (60px) */
+      height: 60px !important;
+      background-color: #333;
       border: 4px solid #888;
-      border-radius: 8px;
+      border-radius: 10px;
       cursor: pointer;
-      position: relative;
       display: inline-block;
       vertical-align: middle;
     }
 
-    /* Checked State - Background turns Gold */
     input[type="checkbox"]:checked {
-      background-color: #ffcc00 !important; /* Gold background */
+      background-color: #ffcc00 !important;
       border-color: #fff !important;
-      box-shadow: 0 0 15px #ffcc0060;
     }
 
-    /* The Checkmark Icon (using pseudo-element) */
     input[type="checkbox"]:checked::after {
       content: '✔';
-      font-size: 35px;
-      color: black;      /* Black check on Gold background is very high contrast */
+      font-size: 45px;
+      color: black;
       font-weight: bold;
       position: absolute;
       top: 50%;
       left: 50%;
-      transform: translate(-50%, -55%); /* Center it perfectly */
+      transform: translate(-50%, -55%);
       line-height: 1;
     }
 
-    /* Button Hover Effects */
+    /* Button Hover */
     button:hover {
       transform: scale(1.05);
       color: #ffea80 !important;
