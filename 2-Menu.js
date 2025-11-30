@@ -1152,6 +1152,10 @@ function saveAccessibilitySettings() {
 }
 
 function injectCustomStyles() {
+  // Remove existing style if present to avoid duplicates
+  const existingStyle = document.getElementById('custom-menu-styles');
+  if (existingStyle) existingStyle.remove();
+
   const style = createElement("style", `
     @font-face {
       font-family: "MyFont";
@@ -1159,53 +1163,84 @@ function injectCustomStyles() {
     }
     * {
       font-family: "MyFont", sans-serif !important;
-      try {
-        const iframe = document.getElementById('game-iframe');
-        if (iframe && iframe.contentWindow) {
-          iframe.contentWindow.postMessage({ type: 'stop-game-music' }, '*');
-        }
-      } catch (e) {}
       transition: all 0.25s ease;
+      box-sizing: border-box; /* Helps with padding calculations */
     }
+
+    /* --- BUTTON STYLES --- */
     button:hover {
       transform: scale(1.05);
       text-shadow: 0 0 10px #ffffff80;
       color: #ffea80 !important;
     }
-    input[type="checkbox"], select, input[type="range"] {
-      accent-color: #ffcc00;
+
+    /* --- CHECKBOX FIX --- */
+    input[type="checkbox"] {
+      appearance: none;         /* Remove default styling */
+      -webkit-appearance: none;
+      width: 40px !important;   /* Force width */
+      height: 40px !important;  /* Force height */
+      background-color: rgba(0,0,0,0.5);
+      border: 2px solid white;
+      border-radius: 4px;
+      cursor: pointer;
+      position: relative;
     }
+    /* The checkmark */
+    input[type="checkbox"]:checked {
+      background-color: #ffcc00;
+      border-color: #ffcc00;
+    }
+    input[type="checkbox"]:checked::after {
+      content: '✔';
+      color: black;
+      font-size: 28px;
+      position: absolute;
+      top: -4px;
+      left: 6px;
+    }
+
+    /* --- DROPDOWN (SELECT) FIX --- */
+    select {
+      appearance: none; /* Removes default system styling */
+      -webkit-appearance: none;
+      background-color: #222;
+      color: white;
+      border: 2px solid #555;
+      padding-left: 15px;
+      cursor: pointer;
+      background-image: url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23ffcc00%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E');
+      background-repeat: no-repeat;
+      background-position: right 15px center;
+      background-size: 15px;
+    }
+    select:focus {
+      border-color: #ffcc00;
+      outline: none;
+    }
+
+    /* --- SLIDER STYLES --- */
     input[type="range"] {
       height: 10px;
       border-radius: 999px;
       background: rgba(255, 255, 255, 0.25);
       outline: none;
       -webkit-appearance: none;
-      appearance: none;
     }
     input[type="range"]::-webkit-slider-thumb {
       -webkit-appearance: none;
-      width: 50px;
-      height: 10px;
+      width: 40px;  /* Made handle bigger */
+      height: 40px; /* Made handle bigger */
       border-radius: 50%;
       background: #ffcc00;
       box-shadow: 0 0 6px #ffcc0070;
-      border: 2px solid #f5b800;
+      border: 2px solid white;
       cursor: pointer;
-      margin-top: -3px;
+      margin-top: -15px; /* Centers the thumb on the track */
     }
-    input[type="range"]::-moz-range-thumb {
-      width: 50px;
-      height: 10px;
-      border-radius: 50%;
-      background: #ffcc00;
-      border: 2px solid #f5b800;
-      box-shadow: 0 0 6px #ffcc0070;
-      cursor: pointer;
-    }
-    label {
-      color: white !important;
-    }
+
+    label { color: white !important; }
   `);
+  style.id = 'custom-menu-styles'; // Tag it so we don't duplicate
   style.parent(document.head);
 }
