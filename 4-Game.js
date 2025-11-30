@@ -5141,9 +5141,3 @@ function ensureLoadingOverlayDom() {
     return el;
   } catch (e) { return null; }
 } 
-
-//I love rean
-
-function iloveyou(tileX, tileY) {
-
-}
