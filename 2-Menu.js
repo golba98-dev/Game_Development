@@ -502,15 +502,24 @@ function showSubSettings(label) {
   const panelW = 0.7 * width;
   const panelH = 0.7 * height;
   const panelLeft = cx - panelW / 2;
-  const panelRight = cx + panelW / 2;
-  const paddingX = panelW * 0.08;
-  const labelX = panelLeft + paddingX;
-  const controlX = panelLeft + panelW * 0.42;
-  const controlWidth = panelRight - paddingX - controlX;
+  
+  // --- WIDTH FIX ---
+  // 1. Move the start of the controls further left (0.35 instead of 0.42)
+  const controlX = panelLeft + (panelW * 0.35);
+  
+  // 2. FORCE the width to be 55% of the panel. This guarantees they are wide.
+  const controlWidth = panelW * 0.55; 
+  
+  // 3. Position the text labels
+  const labelX = panelLeft + (panelW * 0.05);
+  
   const spacingY = panelH * 0.14;
 
   const ctx = createSettingsContext({
-    labelX, controlX, controlWidth, panelH,
+    labelX, 
+    controlX, 
+    controlWidth, 
+    panelH,
     startY: cy - panelH / 2 + panelH * 0.18,
     spacingY
   });
@@ -575,59 +584,41 @@ function createSettingLabel(txt, x, y, maxWidth = 200) {
 // --- PASTE THIS BEFORE 'const CATEGORY_BUILDERS' ---
 
 function createSettingsContext(layout) {
-  // This object allows us to chain commands like .addSliderRow().addCheckboxRow()
   return {
     layout: layout,
     y: layout.startY,
 
-    // Helper to add an element to the active list so it gets deleted later
-    pushElement(el) {
-      activeSettingElements.push(el);
-    },
+    pushElement(el) { activeSettingElements.push(el); },
 
     addSliderRow(labelText, min, max, currentVal, onChange, opts) {
-      // 1. Create the Label
-      const lbl = createSettingLabel(labelText, this.layout.labelX, this.y);
-      this.pushElement(lbl);
+      this.pushElement(createSettingLabel(labelText, this.layout.labelX, this.y));
 
-      // 2. Create the Slider
       const slider = createSlider(min, max, currentVal);
-      slider.position(this.layout.controlX, this.y + 10); // +10 to align vertically with text
+      // Center slider vertically relative to label
+      slider.position(this.layout.controlX, this.y + 15); 
       slider.style('width', this.layout.controlWidth + 'px');
-      slider.style('z-index', '20000'); // Ensure it's on top of the background
+      slider.style('z-index', '20000');
       
-      // Tag it if it's an audio setting so we can sync it later
       if (opts && opts.isAudio) {
         slider.attribute('data-setting', labelText === "Master Volume" ? "masterVol" : 
                                          labelText === "Music Volume" ? "musicVol" : "sfxVol");
       }
-
       slider.input(() => onChange(slider.value()));
       this.pushElement(slider);
 
-      // Move Y down for next row
       this.y += this.layout.spacingY;
-      return this; // Allow chaining
+      return this;
     },
 
     addCheckboxRow(labelText, isChecked, onChange) {
-      // 1. Create Label
-      const lbl = createSettingLabel(labelText, this.layout.labelX, this.y);
-      this.pushElement(lbl);
+      this.pushElement(createSettingLabel(labelText, this.layout.labelX, this.y));
 
-      // 2. Create Checkbox
       const chk = createCheckbox('', isChecked);
-      chk.position(this.layout.controlX, this.y);
+      chk.position(this.layout.controlX, this.y + 5); 
       chk.style('z-index', '20000');
-      // Add a class for specific styling if needed
       if(chk.elt) chk.elt.classList.add('setting-checkbox');
-      
-      // Apply p5 checkbox styling fixes
-      chk.style('width', '30px');
-      chk.style('height', '30px');
 
       if (onChange) chk.changed(() => onChange(chk.checked()));
-      
       this.pushElement(chk);
 
       this.y += this.layout.spacingY;
@@ -635,34 +626,28 @@ function createSettingsContext(layout) {
     },
 
     addSelectRow(labelText, options, config) {
-      // 1. Create Label
-      const lbl = createSettingLabel(labelText, this.layout.labelX, this.y);
-      this.pushElement(lbl);
+      this.pushElement(createSettingLabel(labelText, this.layout.labelX, this.y));
 
-      // 2. Create Dropdown
       const sel = createSelect();
-      sel.position(this.layout.controlX, this.y + 5);
-      sel.size(this.layout.controlWidth, 40);
+      
+      // --- HEIGHT FIX IS HERE ---
+      sel.position(this.layout.controlX, this.y - 10); // Moved up slightly
+      sel.size(this.layout.controlWidth, 70);          // Increased height to 70px
+      sel.style('height', '70px');                     // Force CSS height
+      sel.style('line-height', '70px');                // Center text vertically
       sel.style('z-index', '20000');
-      sel.style('font-size', '20px');
-      sel.style('background', '#333');
-      sel.style('color', 'white');
-      sel.style('border', '1px solid #555');
-      sel.style('border-radius', '5px');
-
-      // Populate options
+      sel.style('font-size', '28px');                  // Large clear font
+      sel.style('padding-left', '15px');               // Space from left edge
+      sel.style('padding-top', '0px');                 // Remove top padding so line-height works
+      
       options.forEach(opt => sel.option(opt));
 
-      // Handle config (getting initial value and setting change handler)
       let initialVal = null;
       let changeHandler = null;
-
       if (typeof config === 'object') {
         if (config.value) initialVal = config.value;
         if (config.onChange) changeHandler = config.onChange;
-      } else if (typeof config === 'function') {
-        changeHandler = config;
-      }
+      } else if (typeof config === 'function') changeHandler = config;
 
       if (initialVal) sel.selected(initialVal);
       if (changeHandler) sel.changed(() => changeHandler(sel.value()));
