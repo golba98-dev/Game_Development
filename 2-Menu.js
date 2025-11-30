@@ -572,6 +572,109 @@ function createSettingLabel(txt, x, y, maxWidth = 200) {
   return d;
 }
 
+// --- PASTE THIS BEFORE 'const CATEGORY_BUILDERS' ---
+
+function createSettingsContext(layout) {
+  // This object allows us to chain commands like .addSliderRow().addCheckboxRow()
+  return {
+    layout: layout,
+    y: layout.startY,
+
+    // Helper to add an element to the active list so it gets deleted later
+    pushElement(el) {
+      activeSettingElements.push(el);
+    },
+
+    addSliderRow(labelText, min, max, currentVal, onChange, opts) {
+      // 1. Create the Label
+      const lbl = createSettingLabel(labelText, this.layout.labelX, this.y);
+      this.pushElement(lbl);
+
+      // 2. Create the Slider
+      const slider = createSlider(min, max, currentVal);
+      slider.position(this.layout.controlX, this.y + 10); // +10 to align vertically with text
+      slider.style('width', this.layout.controlWidth + 'px');
+      slider.style('z-index', '20000'); // Ensure it's on top of the background
+      
+      // Tag it if it's an audio setting so we can sync it later
+      if (opts && opts.isAudio) {
+        slider.attribute('data-setting', labelText === "Master Volume" ? "masterVol" : 
+                                         labelText === "Music Volume" ? "musicVol" : "sfxVol");
+      }
+
+      slider.input(() => onChange(slider.value()));
+      this.pushElement(slider);
+
+      // Move Y down for next row
+      this.y += this.layout.spacingY;
+      return this; // Allow chaining
+    },
+
+    addCheckboxRow(labelText, isChecked, onChange) {
+      // 1. Create Label
+      const lbl = createSettingLabel(labelText, this.layout.labelX, this.y);
+      this.pushElement(lbl);
+
+      // 2. Create Checkbox
+      const chk = createCheckbox('', isChecked);
+      chk.position(this.layout.controlX, this.y);
+      chk.style('z-index', '20000');
+      // Add a class for specific styling if needed
+      if(chk.elt) chk.elt.classList.add('setting-checkbox');
+      
+      // Apply p5 checkbox styling fixes
+      chk.style('width', '30px');
+      chk.style('height', '30px');
+
+      if (onChange) chk.changed(() => onChange(chk.checked()));
+      
+      this.pushElement(chk);
+
+      this.y += this.layout.spacingY;
+      return this;
+    },
+
+    addSelectRow(labelText, options, config) {
+      // 1. Create Label
+      const lbl = createSettingLabel(labelText, this.layout.labelX, this.y);
+      this.pushElement(lbl);
+
+      // 2. Create Dropdown
+      const sel = createSelect();
+      sel.position(this.layout.controlX, this.y + 5);
+      sel.size(this.layout.controlWidth, 40);
+      sel.style('z-index', '20000');
+      sel.style('font-size', '20px');
+      sel.style('background', '#333');
+      sel.style('color', 'white');
+      sel.style('border', '1px solid #555');
+      sel.style('border-radius', '5px');
+
+      // Populate options
+      options.forEach(opt => sel.option(opt));
+
+      // Handle config (getting initial value and setting change handler)
+      let initialVal = null;
+      let changeHandler = null;
+
+      if (typeof config === 'object') {
+        if (config.value) initialVal = config.value;
+        if (config.onChange) changeHandler = config.onChange;
+      } else if (typeof config === 'function') {
+        changeHandler = config;
+      }
+
+      if (initialVal) sel.selected(initialVal);
+      if (changeHandler) sel.changed(() => changeHandler(sel.value()));
+
+      this.pushElement(sel);
+
+      this.y += this.layout.spacingY;
+      return this;
+    }
+  };
+}
+
 
 
 const CATEGORY_BUILDERS = {
