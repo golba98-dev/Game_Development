@@ -632,7 +632,7 @@ function createSettingsContext(layout) {
 
       const sel = createSelect();
       sel.position(this.layout.controlX, this.y - 5);
-      sel.size(this.layout.controlWidth, 60); 
+      sel.size(this.layout.controlWidth, 100); 
       sel.style('font-size', '24px');
       sel.style('z-index', '20000');
       sel.style('background', '#222');
@@ -1198,8 +1198,8 @@ function injectCustomStyles() {
     /* The Handle (Thumb) - THE BUTTON YOU DRAG */
     input[type="range"]::-webkit-slider-thumb {
       -webkit-appearance: none;
-      height: 100px !important;    /* GIANT HEIGHT */
-      width: 100px !important;     /* GIANT WIDTH */
+      height: 55px !important;    /* GIANT HEIGHT */
+      width: 55px !important;     /* GIANT WIDTH */
       background: #ffcc00;        
       border: 4px solid white;
       border-radius: 10px;        /* Slightly rounded square */
