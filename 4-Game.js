@@ -22,6 +22,7 @@ let activeSettingElements = [];
 let textSizeSetting = 75; 
 let difficultySetting = 'normal'; 
 let settingsOverlayDiv = null; 
+let settingsOverlayPanel = null;
 
 const SETTINGS_CATEGORIES = Object.freeze(["Audio", "Gameplay", "Controls", "Accessibility", "Language"]);
 const DEFAULT_SETTINGS = Object.freeze({
@@ -36,6 +37,17 @@ const BACK_BUTTON_VERTICAL_OFFSET = 120;
 let genPhase = 0;      
 let genTimer = 0;      
 let genTempData = {};  
+
+// --- ZOOM SETTINGS ---
+const FIXED_VIRTUAL_HEIGHT = 3000; 
+let gameScale = 1;
+
+// --- SPRINT VARIABLES (Prevents Crash) ---
+let sprintEnergy = 100;
+const SPRINT_MAX = 100;
+const SPRINT_COST_PER_FRAME = 0.5; 
+const SPRINT_REGEN_PER_FRAME = 0.2;
+let lastRunTime = 0;
 
 // --- CORE LIFECYCLE ---
 // preload() -
@@ -281,14 +293,44 @@ function preload() {
 }
 
 function setup() {
-  console.log('[game] setup() starting...');
+  console.log("!!! NEW VERSION LOADED !!! - FIXED_VIRTUAL_HEIGHT = " + FIXED_VIRTUAL_HEIGHT);
+  
   W = windowWidth;
   H = windowHeight;
-  virtualW = W;
-  virtualH = H;
-  createCanvas(W, H);
-  noSmooth();
-  try { injectCustomStyles(); } catch (e) { console.warn('[game] injectCustomStyles call failed', e); }
+
+  // 1. FORCE SHARPNESS (CSS Method)
+  // This makes the game crisp immediately.
+  let canvasStyle = document.createElement('style');
+  canvasStyle.innerHTML = `
+    canvas { 
+      image-rendering: pixelated !important; 
+      image-rendering: crisp-edges !important; 
+    }
+    #gd-loading-content {
+      transform-origin: center center;
+      transition: transform 0.1s ease-out;
+    }
+  `;
+  document.head.appendChild(canvasStyle);
+
+  // 2. High Resolution
+  pixelDensity(window.devicePixelRatio || 1);
+
+  // 3. Calculate Scale
+  gameScale = H / FIXED_VIRTUAL_HEIGHT;
+  virtualW = W / gameScale;
+  virtualH = H / gameScale;
+
+  let cnv = createCanvas(W, H);
+  
+  // 4. Backup Sharpness
+  try {
+    if (cnv && cnv.elt) cnv.elt.style.imageRendering = "pixelated"; 
+    if (drawingContext) drawingContext.imageSmoothingEnabled = false;
+    noSmooth(); 
+  } catch (e) {}
+
+  try { injectCustomStyles(); } catch (e) {}
   
   const urlParams = new URLSearchParams(window.location.search);
   masterVol = parseFloat(urlParams.get('masterVol')) || 0.8;
@@ -310,72 +352,45 @@ function setup() {
   let loadedFromServer = false;
   let serverFetchPromise = Promise.resolve(false);
 
-
   try {
     const loc = window.location;
     const isLocal = loc.hostname === 'localhost' || loc.hostname === '127.0.0.1';
     const forceServer = urlParams.get('useServer') === '1';
-    
     if (isLocal || forceServer) {
-      console.log('[game] Attempting to fetch map from server...');
       serverFetchPromise = tryFetchActiveMap();
-    } else {
-       console.log('[game] Not on localhost and useServer!=1. Skipping server fetch.');
     }
-  } catch (e) { 
-      console.warn('[game] server check init failed', e); 
-  }
+  } catch (e) {}
 
   AssetTracker.waitReady(3500).then((ready) => {
     if (ready) {
       console.log('[game] assets loaded. Pre-warming clouds...');
-      for(let i = 0; i < 15; i++) spawnCloud(Math.random() * width); 
+      
+      // FORCE CLOUDS EVERYWHERE
+      // We use the virtual world width so clouds don't bunch on the left.
+      const wWidth = width / (height / 3000); 
+      for(let i = 0; i < 25; i++) {
+          spawnCloud(Math.random() * wWidth); 
+      }
     }
 
-    const runAutoGenerator = () => {
-        console.log('[game] Generator triggered. Creating NEW map...');
-        generateMap(); 
-    };
+    const runAutoGenerator = () => { generateMap(); };
 
     serverFetchPromise.then((serverLoaded) => {
-    
       if (serverLoaded) {
          if (persistentGameId && persistentGameId.startsWith('server_default_')) {
-             console.log('[game] Server map is the DEFAULT PLACEHOLDER. Generating fresh map to overwrite it...');
              runAutoGenerator();
-         } else {
-             console.log('[game] Valid map loaded from server (ID: ' + persistentGameId + '). Using it.');
-            
          }
          return; 
       }
-
-      
-      console.log('[game] Server load failed or returned false. Checking LocalStorage...');
-      if (loadMapFromStorage()) {
-         console.log('[game] Loaded map from LocalStorage.');
-         return;
-      }
-
-    
-      console.log('[game] No map from server or storage. Generating new map.');
+      if (loadMapFromStorage()) return;
       runAutoGenerator();
-
-    }).catch((err) => {
-       console.warn('[game] serverFetchPromise chain error:', err);
-       runAutoGenerator();
-    });
-
+    }).catch((err) => { runAutoGenerator(); });
     
     try {
       serverFetchPromise.finally(() => {
-          
           setTimeout(() => {
              if (typeof mapLoadComplete === 'undefined' || !mapLoadComplete) {
-                 if (genPhase === 0) {
-                    console.log('[game] Safety net: Map not loaded after wait. Generating...');
-                    generateMap();
-                 }
+                 if (genPhase === 0) generateMap();
              }
           }, 1000);
       });
@@ -384,22 +399,14 @@ function setup() {
     if (!ready) {
       try {
         AssetTracker.onReady(() => {
-          try {
-            console.log('[game] assets finished after timeout — refreshing map image');
-            createMapImage(); 
-            redraw(); 
-          } catch (e) {}
+          try { createMapImage(); redraw(); } catch (e) {}
         });
       } catch (e) {}
     }
   });
   
-  if (gameMusic) {
-    gameMusic.setVolume(musicVol * masterVol);
-  }
-  if (pendingGameActivated) {
-    try { _confirmResize(); pendingGameActivated = false; } catch (e) { console.warn('[game] pending _confirmResize failed', e); }
-  }
+  if (gameMusic) gameMusic.setVolume(musicVol * masterVol);
+  if (pendingGameActivated) { try { _confirmResize(); pendingGameActivated = false; } catch (e) {} }
 }
 
 function windowResized() {
@@ -421,13 +428,30 @@ function _confirmResize() {
 
   W = windowWidth;
   H = windowHeight;
-  virtualW = W;
-  virtualH = H;
+
+  // 1. Maintain Quality
+  pixelDensity(window.devicePixelRatio || 1);
+  
+  // 2. Recalculate Scale
+  gameScale = H / FIXED_VIRTUAL_HEIGHT;
+  virtualW = W / gameScale;
+  virtualH = H / gameScale;
 
   resizeCanvas(W, H);
+  
+  // 3. RE-APPLY CLARITY (Important!)
+  try {
+    if (drawingContext) {
+      drawingContext.imageSmoothingEnabled = false;
+    }
+    let cnv = select('canvas');
+    if (cnv) {
+        cnv.elt.style.imageRendering = "pixelated";
+    }
+  } catch (e) {}
 
   if (typeof mapStates === 'undefined' || !mapStates || mapStates.length === 0) {
-      console.log('[game] windowResized: Map not ready yet. Skipping resize logic (letting setup handle init).');
+      console.log('[game] windowResized: Map not ready yet.');
       return;
   }
 
@@ -437,13 +461,11 @@ function _confirmResize() {
   const needsRegen = mapW < virtualW || mapH < virtualH;
 
   if (!needsRegen) {
- 
     console.log('[game] windowResized: preserving existing map');
     try { createMapImage(); } catch (e) { console.warn('createMapImage failed', e); }
     redraw();
   } else {
-   
-    console.log('[game] windowResized: map too small for new viewport, regenerating');
+    console.log('[game] windowResized: map too small, regenerating');
     try { showToast('Viewport expanded — regenerating map', 'info', 2000); } catch (e) {}
     generateMap();
   }
@@ -458,48 +480,34 @@ function createFullWindowCanvas() {
 
 function mousePressed() {
   try {
-    if (inGameMenuVisible) {
-      
-      try {
-        const mx = mouseX;
-        const my = mouseY;
-        for (const b of inGameMenuButtonRects || []) {
-          if (!b) continue;
-          if (mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h) {
-            if (b.id === 'continue') {
-              inGameMenuVisible = false;
-              return;
-            }
-            if (b.id === 'settings') {
-              
-              try {
-                
-                openInGameSettings({ 
-                    masterVol, 
-                    musicVol, 
-                    sfxVol, 
-                    difficulty: currentDifficulty 
-                });
-                
-              } catch (e) { console.warn('[game] openInGameSettings failed', e); }
-              return;
-            }
-            if (b.id === 'exit') {
-              try {
-                if (window.parent && window.parent !== window) {
-                  window.parent.postMessage({ type: 'close-game-overlay' }, '*');
-                  try { if (typeof window.parent.removeGameOverlay === 'function') window.parent.removeGameOverlay(); } catch (e) {}
-                }
-              } catch (e) { console.warn('[game] failed to post close-game-overlay', e); }
-              return;
-            }
-          }
-        }
-      } catch (e) { console.warn('[game] inGameMenu mouse handling failed', e); }
-      
+    // FIX: Un-scale mouse coordinates to match the virtual world
+    const mx = mouseX / gameScale;
+    const my = mouseY / gameScale;
+
+    // Canvas menu click handling removed (now using DOM menu)
+  } catch (e) {}
+}
+
+function togglePauseMenuFromEscape() {
+  const now = Date.now();
+  if (now - _lastEscToggleAt < 50) return; // debounce to prevent double-fire from multiple handlers
+  _lastEscToggleAt = now;
+
+  try {
+    if (settingsOverlayDiv) {
+      if (settingsOverlayDiv.closeZoomPanel) settingsOverlayDiv.closeZoomPanel();
+      else settingsOverlayDiv.remove();
+      settingsOverlayDiv = null;
+      openInGameMenu();
       return;
     }
-  } catch (e) {}
+
+    if (inGameMenuVisible) {
+      closeInGameMenu();
+    } else {
+      openInGameMenu();
+    }
+  } catch (e) { console.warn('[game] toggling inGameMenuVisible failed', e); }
 }
 
 function keyPressed() {
@@ -548,14 +556,7 @@ function keyPressed() {
     } catch (e) { console.warn('[game] jump-forward movement failed', e); }
     return;
   }
-  if (key === 'Escape' || keyCode === 27) {
-    try {
-      console.log('[game] keyPressed Escape — toggling inGameMenuVisible (was)', inGameMenuVisible);
-      inGameMenuVisible = !inGameMenuVisible;
-      console.log('[game] inGameMenuVisible is now', inGameMenuVisible);
-    } catch (e) { console.warn('[game] toggling inGameMenuVisible failed', e); }
-    return;
-  }
+  if (key === 'Escape' || keyCode === 27) { togglePauseMenuFromEscape(); return false; }
 
   if (key === 'f' || key === 'F') {
     fullscreen(!fullscreen());
@@ -589,6 +590,18 @@ function keyPressed() {
     } catch (e) { console.warn('[game] debug O failed', e); }
     return;
   }
+}
+
+// Global escape listener to handle cases where p5 keyPressed is not firing (e.g., focus on overlay div)
+try {
+  window.addEventListener('keydown', (ev) => {
+    if (ev && ev.key === 'Escape') {
+      ev.preventDefault();
+      togglePauseMenuFromEscape();
+    }
+  }, { capture: true });
+} catch (e) {
+  console.warn('[game] failed to attach global Escape handler', e);
 }
 
 
@@ -1398,9 +1411,24 @@ function createMapImage() {
   const w = logicalW * cellSize;
   const h = logicalH * cellSize;
   console.log(`[createMapImage] creating graphics ${w}x${h} (logical: ${logicalW}x${logicalH})`);
+  
   mapImage = createGraphics(w, h);
-  mapImage.noSmooth();
+  
+  // 1. Memory Optimization (Keep this at 1 for large maps)
+  mapImage.pixelDensity(1); 
+  
+  // 2. FORCE CLARITY on the map buffer
+  try {
+    // This is the specific property that makes the map crisp
+    if (mapImage.drawingContext) {
+        mapImage.drawingContext.imageSmoothingEnabled = false;
+    }
+    // Try standard way too, just in case
+    mapImage.noSmooth(); 
+  } catch(e) {}
+
   const useSprites = showTextures && spritesheet && spritesheet.width > 1;
+  // ... (keep the rest of the existing function logic exactly as is below) ...
   console.log(`[createMapImage] useSprites=${useSprites}, spritesheet.width=${spritesheet ? spritesheet.width : 'null'}`);
   if (showTextures && !useSprites) {
     console.warn('[createMapImage] textures requested but spritesheet not available - drawing raw map');
@@ -1446,7 +1474,6 @@ function createMapImage() {
       }
       else if (tileState >= TILE_TYPES.HILL_NORTH && tileState <= TILE_TYPES.HILL_NORTHWEST) {
         
-        
         const grassColor = getColorForState(TILE_TYPES.GRASS);
         const baseTileImg = (TILE_IMAGES && TILE_IMAGES['tile_1']) ? TILE_IMAGES['tile_1'] : null;
         if (baseTileImg) {
@@ -1457,7 +1484,6 @@ function createMapImage() {
           mapImage.rect(px, py, cellSize, cellSize);
         }
 
-        
         const direction = Object.keys(TILE_TYPES).find(key => TILE_TYPES[key] === tileState).replace('HILL_', '').toLowerCase();
         img = HILL_ASSETS[direction];
         if (img) {
@@ -1477,7 +1503,6 @@ function createMapImage() {
         mapImage.rect(px, py, cellSize, cellSize);
       }
 
-      
       if (tileState >= TILE_TYPES.HILL_NORTH && tileState <= TILE_TYPES.HILL_NORTHWEST) {
         try {
           const gradH = Math.max(8, Math.min(Math.floor(cellSize * 0.5), 48));
@@ -1489,13 +1514,10 @@ function createMapImage() {
               const alpha = map(row, 0, Math.max(1, gradH - 1), 0, maxAlpha);
               mapImage.noStroke();
               mapImage.tint(255, alpha);
-              
-              
               try {
                 const srcH = Math.max(1, Math.floor((grassImg.height || 1) - 1));
                 mapImage.image(grassImg, px, py + y, cellSize, 1, 0, srcH, grassImg.width, 1);
               } catch (e) {
-                
                 mapImage.image(grassImg, px, py + y, cellSize, 1);
               }
               mapImage.noTint();
@@ -1541,7 +1563,6 @@ function createMapImage() {
     }
   }
 
-  
   try {
     for (let ly = 0; ly < logicalH; ly++) {
       for (let lx = 0; lx < logicalW; lx++) {
@@ -1617,14 +1638,10 @@ function createMapImage() {
               shouldMark = true;
             }
             if (!shouldMark) continue;
-           
+            // logic to mark edge layer (if needed) ...
           } catch (e) {}
         }
       }
-      if (markedCount > 0 && EDGE_LAYER_DEBUG) {
-        console.log('[game] marked non-solid tiles under overlay as barrier=', markedCount);
-      }
-      
       try {
         for (const t of treeObjects) {
           if (!t) continue;
@@ -1651,7 +1668,6 @@ function createMapImage() {
       if (!EDGE_LAYER_ENABLED) {
         console.log('[game] edgeLayer painting skipped because EDGE_LAYER_ENABLED=false');
       } else {
-      
         let cnt = 0;
         for (let i = 0; i < edgeLayer.length; i++) cnt += edgeLayer[i] ? 1 : 0;
         console.log('[game] painting edgeLayer into raw mapImage - barrier tiles=', cnt, 'logical=', logicalW, 'x', logicalH, 'useSprites=', useSprites);
@@ -1671,10 +1687,6 @@ function createMapImage() {
   } catch (e) {
     console.warn('[game] failed to paint edgeLayer into raw map image', e);
   }
-
-  
-  
-  
 }
 
 function ensureEdgeLayerConnectivity() {
@@ -2327,18 +2339,227 @@ function neighbors(x, y) {
 // stylePixelButton(btn)
 // makeBtn(label, x, y, w, h, cb)
 
-function drawInGameMenu() {
+let inGameMenuOverlay = null;
+let _lastEscToggleAt = 0;
+
+// Capture initial zoom baselines so we can detect relative browser zoom changes.
+const BASE_VV_SCALE = (typeof window !== 'undefined' && window.visualViewport && window.visualViewport.scale) ? window.visualViewport.scale : 1;
+const BASE_DPR = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
+let __zoomProbeEl = null;
+
+function measureZoomViaInch() {
+  try {
+    if (typeof document === 'undefined') return null;
+    if (!__zoomProbeEl) {
+      __zoomProbeEl = document.createElement('div');
+      __zoomProbeEl.id = 'gd-zoom-probe';
+      __zoomProbeEl.style.position = 'absolute';
+      __zoomProbeEl.style.width = '1in';
+      __zoomProbeEl.style.height = '1in';
+      __zoomProbeEl.style.left = '-9999px';
+      __zoomProbeEl.style.top = '-9999px';
+      __zoomProbeEl.style.pointerEvents = 'none';
+      document.body.appendChild(__zoomProbeEl);
+    }
+    const rect = __zoomProbeEl.getBoundingClientRect();
+    if (!rect || !rect.width) return null;
+    // CSS inch is 96px at 100% zoom; measured px / 96 gives zoom factor.
+    return rect.width / 96;
+  } catch (e) { return null; }
+}
+
+// Keep a DOM node visually constant when browser zoom changes
+function makeElementZoomInvariant(el, origin = 'center center') {
+  if (!el) return () => {};
+  let zoomLoopId = null;
+  const update = () => {
+    if (!el || !el.parentNode) return;
+    let zoom = 1;
+    if (window.visualViewport) {
+      zoom = window.visualViewport.scale || 1;
+    } else {
+      zoom = (window.outerWidth / window.innerWidth) || 1;
+    }
+    zoom = Math.max(0.1, Math.min(10, zoom));
+    const inv = 1 / zoom;
+    el.style.transform = `scale(${inv})`;
+    el.style.transformOrigin = origin;
+    zoomLoopId = requestAnimationFrame(update);
+  };
+  update();
+  return () => { if (zoomLoopId) cancelAnimationFrame(zoomLoopId); };
+}
+
+function createZoomStablePanel(w, h, id) {
+  let container = createDiv('');
+  container.id(id);
+  container.style('position', 'fixed');
+  container.style('top', '0');
+  container.style('left', '0');
+  container.style('width', '100%');
+  container.style('height', '100%');
+  container.style('z-index', '100000');
+  container.style('display', 'flex');
+  container.style('align-items', 'center');
+  container.style('justify-content', 'center');
+  container.style('background-color', 'rgba(0, 0, 0, 0.5)'); 
+  container.style('transform-origin', 'top left');
+  container.style('will-change', 'transform');
+  container.style('pointer-events', 'auto');
+  
+  let panel = createDiv('');
+  panel.parent(container);
+  panel.style('width', `${w}px`);
+  panel.style('height', `${h}px`);
+  panel.style('background-color', 'rgba(30, 30, 35, 0.95)');
+  panel.style('border', '4px solid #444');
+  panel.style('border-radius', '16px');
+  panel.style('display', 'flex');
+  panel.style('flex-direction', 'column');
+  panel.style('align-items', 'center');
+  panel.style('justify-content', 'center');
+  panel.style('font-family', '"Courier New", monospace');
+  panel.style('color', 'white');
+  panel.style('box-shadow', '0 0 40px rgba(0,0,0,0.8)');
+  panel.style('transform', 'none');
+  
+  let zoomLoopId = null;
+  const updateZoom = () => {
+    if (!document.getElementById(id)) return; 
+    
+    const vv = window.visualViewport;
+    let zoomCandidates = [];
+    let ox = 0;
+    let oy = 0;
+
+    if (vv) {
+      zoomCandidates.push(vv.scale);
+      ox = vv.offsetLeft || 0;
+      oy = vv.offsetTop || 0;
+    }
+
+    const probeZoom = measureZoomViaInch();
+    if (probeZoom) zoomCandidates.push(probeZoom);
+
+    const dprZoom = (window.devicePixelRatio || 1) / (BASE_DPR || 1);
+    zoomCandidates.push(dprZoom);
+
+    if (window.outerWidth && window.innerWidth) {
+      zoomCandidates.push(window.outerWidth / window.innerWidth);
+    }
+
+    // Pick the first sane zoom candidate
+    let zoom = zoomCandidates.find(v => v && isFinite(v) && v > 0.05 && v < 20) || 1;
+
+    zoom = Math.max(0.1, Math.min(10, zoom));
+    const inv = 1 / zoom;
+
+    // Use CSS zoom (Chrome/Edge) as a primary neutralizer; keep transform for offsets only.
+    if (container.elt && container.elt.style) {
+      container.elt.style.zoom = inv;
+    }
+
+    // Translate for visual viewport offsets; scale left at 1 to avoid double-scaling when zoom is applied via CSS zoom.
+    container.style('transform', `translate(${ox}px, ${oy}px) scale(1)`);
+    
+    zoomLoopId = requestAnimationFrame(updateZoom);
+  };
+  updateZoom();
+
+  return { 
+    container, 
+    panel, 
+    close: () => {
+      if (zoomLoopId) cancelAnimationFrame(zoomLoopId);
+      container.remove();
+    }
+  };
+}
+
+function openInGameMenu() {
+  if (inGameMenuOverlay) {
+    inGameMenuOverlay.close();
+    inGameMenuOverlay = null;
+  }
+  
+  inGameMenuVisible = true;
+  
+  const { container, panel, close } = createZoomStablePanel(500, 400, 'gd-ingame-menu');
+  inGameMenuOverlay = { close, container };
+
+  let title = createDiv('PAUSED');
+  title.parent(panel);
+  title.style('font-size', '48px');
+  title.style('font-weight', 'bold');
+  title.style('margin-bottom', '40px');
+  title.style('color', '#ffcc00');
+  title.style('text-shadow', '3px 3px 0 #000');
+
+  const createMenuBtn = (label, onClick) => {
+    let btn = createButton(label);
+    btn.parent(panel);
+    btn.style('width', '320px');
+    btn.style('height', '60px');
+    btn.style('margin-bottom', '20px');
+    btn.style('font-size', '28px');
+    btn.style('font-family', 'inherit');
+    btn.style('background-color', '#444');
+    btn.style('color', 'white');
+    btn.style('border', 'none');
+    btn.style('cursor', 'pointer');
+    
+    btn.elt.onmouseover = () => btn.style('background-color', '#666');
+    btn.elt.onmouseout = () => btn.style('background-color', '#444');
+    
+    btn.mousePressed(onClick);
+  };
+
+  createMenuBtn('RESUME', () => {
+    closeInGameMenu();
+  });
+
+  createMenuBtn('SETTINGS', () => {
+    inGameMenuOverlay.close();
+    inGameMenuOverlay = null;
+    openInGameSettings({ masterVol, musicVol, sfxVol, difficulty: currentDifficulty });
+  });
+
+  createMenuBtn('EXIT', () => {
+    try {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: 'close-game-overlay' }, '*');
+      }
+    } catch (e) {}
+  });
+}
+
+function closeInGameMenu() {
+  if (inGameMenuOverlay) {
+    inGameMenuOverlay.close();
+    inGameMenuOverlay = null;
+  }
+  inGameMenuVisible = false;
+}
+
+function drawInGameMenu() { return; }
+function drawInGameMenu_OLD() {
   if (!inGameMenuVisible) return;
   try {
     push();
     
-    
+    // Virtual Dimensions
+    const vW = virtualW || (width / gameScale);
+    const vH = virtualH || (height / gameScale);
+
+    // Mouse Logic
     let currentHoveredId = null;
-    if (typeof mouseX === 'number' && typeof mouseY === 'number') {
-      
+    const mx = mouseX / gameScale;
+    const my = mouseY / gameScale;
+    
+    if (typeof mx === 'number' && typeof my === 'number') {
       for (let i = inGameMenuButtonRects.length - 1; i >= 0; i--) {
         const r = inGameMenuButtonRects[i];
-        if (mouseX >= r.x && mouseX <= r.x + r.w && mouseY >= r.y && mouseY <= r.y + r.h) {
+        if (mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h) {
           currentHoveredId = r.id;
           break;
         }
@@ -2346,124 +2567,92 @@ function drawInGameMenu() {
     }
     inGameMenuHovered = currentHoveredId;
 
-   
+    // Background Dimmer
     noStroke();
     fill(0, 0, 0, 200);
-    rect(0, 0, width, height);
+    rect(0, 0, vW, vH); 
 
-   
-    const panelMaxW = Math.floor(width * 0.72);
-    const panelMaxH = Math.floor(height * 0.64);
-    const panelW = Math.max(360, Math.min(920, panelMaxW));
-    const panelH = Math.max(260, Math.min(640, panelMaxH));
-    const px = Math.floor((width - panelW) / 2);
-    const py = Math.floor((height - panelH) / 2);
-
+    // --- NEW SMALLER DIMENSIONS ---
+    const panelW = 500; 
+    const panelH = 400;
     
+    const px = Math.floor((vW - panelW) / 2);
+    const py = Math.floor((vH - panelH) / 2);
+
+    // Panel Body
     push();
-    stroke(0);
-    strokeWeight(6);
-    fill(40, 40, 44, 255); 
+    stroke(0); strokeWeight(6); fill(40, 40, 44, 255); 
     rect(px, py, panelW, panelH, 12);
     pop();
 
-    
     try {
       if (ESC_MENU_BACKGROUND) {
         const imgAspect = ESC_MENU_BACKGROUND.width / ESC_MENU_BACKGROUND.height;
         const panelAspect = panelW / panelH;
         let imgW, imgH;
-        if (imgAspect > panelAspect) {
-          imgW = panelW;
-          imgH = panelW / imgAspect;
-        } else {
-          imgH = panelH;
-          imgW = panelH * imgAspect;
-        }
+        if (imgAspect > panelAspect) { imgW = panelW; imgH = panelW / imgAspect; } 
+        else { imgH = panelH; imgW = panelH * imgAspect; }
         const imgX = px + (panelW - imgW) / 2;
         const imgY = py + (panelH - imgH) / 2;
         image(ESC_MENU_BACKGROUND, imgX, imgY, imgW, imgH);
       }
     } catch (e) {}
 
-    
+    // Button Layout
     const btnLabels = [ { id: 'continue', label: 'Continue' }, { id: 'settings', label: 'Settings' }, { id: 'exit', label: 'Exit' } ];
-
+    const btnW = 320; 
+    const btnH = 60;  
+    const gap = 15;
     
-    const desiredBtnW = Math.min(Math.floor(panelW * 0.68), 520);
-    const baseBtnH = 72;
-    const artAspect = (BUTTON_BG && BUTTON_BG.width && BUTTON_BG.height) ? (BUTTON_BG.width / BUTTON_BG.height) : (desiredBtnW / baseBtnH);
-    const btnArtW = (BUTTON_BG && BUTTON_BG.width && BUTTON_BG.height) ? Math.floor(desiredBtnW) : Math.min(360, Math.floor(panelW * 0.7));
-    const btnArtH = Math.floor(btnArtW / artAspect) || baseBtnH;
+    const totalH = btnH * btnLabels.length + gap * (btnLabels.length - 1);
+    const startY = py + (panelH - totalH) / 2;
 
-    const gap = Math.max(14, Math.floor(panelH * 0.04));
-    const totalH = btnArtH * btnLabels.length + gap * (btnLabels.length - 1);
-    const startY = py + Math.floor((panelH - totalH) / 2) - Math.floor(panelH * 0.03);
-
-    
     inGameMenuButtonRects = [];
 
     for (let i = 0; i < btnLabels.length; i++) {
       const b = btnLabels[i];
-      const bw = btnArtW;
-      const bh = btnArtH;
-      const bx = Math.floor(px + (panelW - bw) / 2);
-      const by = Math.floor(startY + i * (bh + gap));
+      const bx = px + (panelW - btnW) / 2;
+      const by = startY + i * (btnH + gap);
 
-     
-      const currentScale = (inGameMenuHoverScales[b.id] || 1);
-      const desired = (inGameMenuHovered === b.id) ? 1.10 : 1.0;
-      inGameMenuHoverScales[b.id] = lerp(currentScale, desired, 0.18);
+      const currentScaleVal = (inGameMenuHoverScales[b.id] || 1);
+      const desired = (inGameMenuHovered === b.id) ? 1.05 : 1.0;
+      inGameMenuHoverScales[b.id] = lerp(currentScaleVal, desired, 0.2);
 
-      const drawW = Math.floor(bw * inGameMenuHoverScales[b.id]);
-      const drawH = Math.floor(bh * inGameMenuHoverScales[b.id]);
-      const drawX = Math.floor(px + (panelW - drawW) / 2);
-      const drawY = Math.floor(by - Math.floor((drawH - bh) / 2));
+      const drawW = Math.floor(btnW * inGameMenuHoverScales[b.id]);
+      const drawH = Math.floor(btnH * inGameMenuHoverScales[b.id]);
+      const drawX = Math.floor(bx - (drawW - btnW) / 2);
+      const drawY = Math.floor(by - (drawH - btnH) / 2);
 
-      
       try {
-        if (BUTTON_BG) {
-          image(BUTTON_BG, drawX, drawY, drawW, drawH);
-        } else {
-          push(); noStroke(); fill(70); rect(drawX, drawY, drawW, drawH, 10); pop();
-        }
-      } catch (e) { push(); noStroke(); fill(70); rect(drawX, drawY, drawW, drawH, 10); pop(); }
+        if (BUTTON_BG) image(BUTTON_BG, drawX, drawY, drawW, drawH);
+        else { push(); noStroke(); fill(70); rect(drawX, drawY, drawW, drawH, 10); pop(); }
+      } catch (e) {}
 
-      
       try {
         push();
         textFont(uiFont || 'Arial');
         textAlign(CENTER, CENTER);
-        const baseTextSize = Math.max(18, Math.floor(drawH * 0.40));
-        const tSize = Math.floor(baseTextSize * (inGameMenuHovered === b.id ? 1.08 : 1.0));
-        textSize(tSize);
-        
+        textSize(28); 
         noStroke();
         fill(0, 140);
-        text(b.label, drawX + drawW / 2 + 1, drawY + drawH / 2 + 3);
+        text(b.label, drawX + drawW / 2 + 2, drawY + drawH / 2 + 3);
         if (inGameMenuHovered === b.id) fill(255, 220, 0); else fill(255);
-        text(b.label, drawX + drawW / 2, drawY + drawH / 2 + 2);
+        text(b.label, drawX + drawW / 2, drawY + drawH / 2);
         pop();
-      } catch (e) {  }
-
- 
+      } catch (e) {}
+      
       inGameMenuButtonRects.push({ id: b.id, x: drawX, y: drawY, w: drawW, h: drawH });
     }
-
 
     try {
       if (inGameMenuPrevHovered !== inGameMenuHovered) {
         inGameMenuPrevHovered = inGameMenuHovered;
-        if (typeof document !== 'undefined' && document && document.body) {
-          document.body.style.cursor = inGameMenuHovered ? 'pointer' : '';
-        }
+        if (document.body) document.body.style.cursor = inGameMenuHovered ? 'pointer' : '';
       }
     } catch (e) {}
 
     pop();
-  } catch (e) {
-    console.warn('[game] drawInGameMenu error', e);
-  }
+  } catch (e) {}
 }
 
 const CATEGORY_BUILDERS = {
@@ -2501,6 +2690,7 @@ function closeInGameSettings() {
   if (settingsOverlayDiv) {
     settingsOverlayDiv.remove();
     settingsOverlayDiv = null;
+    settingsOverlayPanel = null;
   }
 }
 
@@ -2512,75 +2702,6 @@ function closeInGameSettings() {
   });
 });
 
-function renderSettingsCategories() {
-  activeSettingElements.forEach(e => e.remove());
-  activeSettingElements = [];
-
-  const menuWidth = 600;       
-  const buttonHeight = 110;  
-  const spacing = 30;          
-  const cx = windowWidth / 2;
-  const cy = windowHeight / 2;
-  
-  const totalMenuH = (SETTINGS_CATEGORIES.length * (buttonHeight + spacing)) + 220; 
-  const startY = cy - (totalMenuH / 2);
-  const xPos = cx - (menuWidth / 2);
-
-  
-  const title = createDiv("SETTINGS");
-  title.style('color', '#ffcc00');
-  title.style('font-size', '100px'); 
-  title.style('font-weight', 'bold');
-  title.style('text-align', 'center');
-  title.style('text-shadow', '6px 6px 0 #333');
-  title.position(cx - 400, startY);
-  title.size(800, 140);
-  title.style('z-index', '20005');
-  activeSettingElements.push(title);
-
-  let currentY = startY + 160;
-
-  
-  SETTINGS_CATEGORIES.forEach((label) => {
-    const btn = createButton(label);
-    btn.position(xPos, currentY);
-    btn.size(menuWidth, buttonHeight);
-    
-    stylePixelButton(btn); 
-    btn.style('font-size', '55px'); 
-    
-    btn.mousePressed(() => {
-       showSubSettingsInGame(label);
-    });
-    
-    activeSettingElements.push(btn);
-    currentY += buttonHeight + spacing;
-  });
-
-  
-  const btnClose = createButton("Close");
-  btnClose.position(xPos, currentY + 50);
-  btnClose.size(menuWidth, buttonHeight);
-  
-  stylePixelButton(btnClose); 
-  btnClose.style('font-size', '55px');
-  btnClose.style('color', '#ff5555'); 
-  
-  btnClose.mousePressed(() => {
-    
-    closeInGameSettings();
-    
-    setTimeout(() => {
-      if (window.parent && window.parent !== window) {
-        window.parent.postMessage({
-          type: 'sync-settings',
-          masterVol, musicVol, sfxVol, difficulty: difficultySetting
-        }, '*');
-      }
-    }, 50);
-  });
-  activeSettingElements.push(btnClose);
-}
 
 function showSubSettings(label) {
   clearSubSettings();
@@ -2629,17 +2750,25 @@ function updateLoadingOverlayDom() {
     if (showLoadingOverlay) {
       el.style.display = 'flex';
       el.style.opacity = '1';
+      
+      // NEW: Force the Loading Screen to Zoom Out
+      const content = document.getElementById('gd-loading-content');
+      if (content) {
+          // Force calculate scale: Screen Height / 3000
+          // e.g., 900 / 3000 = 0.3 (Very small, fits perfectly)
+          let s = 1;
+          if (typeof window !== 'undefined') s = window.innerHeight / 3000;
+          content.style.transform = `scale(${s})`;
+      }
     } else {
       el.style.display = 'none';
       el.style.opacity = '0';
       return; 
     }
 
-    
     const msg = el.querySelector('.gd-loading-message');
     if (msg && overlayMessage) msg.innerText = overlayMessage;
 
-    
     let p = 0;
     if (typeof AssetTracker !== 'undefined' && AssetTracker.expected > 0) {
         p = (AssetTracker.loaded / AssetTracker.expected) * 100;
@@ -2648,7 +2777,6 @@ function updateLoadingOverlayDom() {
     }
     p = Math.floor(Math.max(0, Math.min(100, p)));
 
-    
     const fill = el.querySelector('.gd-progress-fill');
     const pct = el.querySelector('.gd-progress-text');
     
@@ -3782,14 +3910,6 @@ const DIFFICULTY_SETTINGS = {
 
 
 
-
-
-
-
-
-
-
-
 // --- SETTINGS & AUDIO ---
 // buildAudioSettings(ctx)
 // buildGameplaySettings(ctx)
@@ -3839,89 +3959,73 @@ const HILL_ASSETS = {};
 
 function draw() {
   
+  // --- Generation Phases ---
   if (genPhase > 0) {
-    
     if (genPhase === 1) {
       showLoadingOverlay = true;
       overlayMessage = 'Initializing World...';
       updateLoadingOverlayDom();
-      
-      
       background(0);
-      
-      
       genTimer = millis() + 100;
-      genPhase = 2; 
-      return; 
+      genPhase = 2; return; 
     }
-
-    
     if (genPhase === 2) {
       background(0); 
       if (millis() < genTimer) return; 
-
-      
       generateMap_Part1();
-      
-      
       overlayMessage = 'Roughening & Eroding...';
       updateLoadingOverlayDom();
-      
-      
       genTimer = millis() + 800;
-      genPhase = 3;
-      return;
+      genPhase = 3; return;
     }
-
-    
     if (genPhase === 3) {
       background(0); 
       if (millis() < genTimer) return; 
-
-      
       generateMap_Part2();
-      
-      
       genPhase = 0;
       showLoadingOverlay = false;
       updateLoadingOverlayDom();
-      
     }
   }
-  
 
+  // --- Main Draw Loop ---
   if (typeof window !== 'undefined' && window && window.__gameDebugShown !== true) { 
     console.log('[game] draw() running'); window.__gameDebugShown = true; 
   }
   
   try { ensureLoadingOverlayDom(); updateLoadingOverlayDom(); } catch (e) {}
 
-  
+  // !!! START GLOBAL SCALING !!!
   push();
 
+  // 1. Apply the shrink factor
+  if (gameScale !== 1) scale(gameScale);
+
+  // 2. Center the game if screen is ultra-wide
   const mapW = (logicalW || 0) * cellSize;
-  if (mapW > 0) {
-      const scaleFactor = width / mapW;
-      if (scaleFactor < 1) {
-          scale(scaleFactor);
-      }
+  if (mapW > 0 && mapW < virtualW) {
+      translate((virtualW - mapW) / 2, 0);
   }
 
   background(34, 139, 34);
-  if (mapImage) {
-    image(mapImage, 0, 0);
-  }
+  
+  if (mapImage) image(mapImage, 0, 0);
 
   if (showLoadingOverlay) {
     background(0); 
+    pop(); 
     return;        
   }
   
   if (playerPosition) {
-    handleMovement();
-    updateMovementInterpolation();
+    // Pause movement when any overlay is visible (settings or pause menu)
+    if (!settingsOverlayDiv && !inGameMenuVisible) {
+      handleMovement();
+      updateMovementInterpolation();
+    }
   }
 
+  // 3. Draw Game World Objects
   try {
     const drawables = [];
     if (Array.isArray(mapOverlays)) {
@@ -3933,68 +4037,48 @@ function draw() {
           drawables.push({ type: 'overlay', o, drawX, drawY, baseY });
         }
     }
-    
     if (playerPosition) {
       const drawTileX = isMoving ? renderX : playerPosition.x;
       const drawTileY = isMoving ? renderY : playerPosition.y;
       const playerBaseY = (drawTileY * cellSize) + cellSize;
       drawables.push({ type: 'player', baseY: playerBaseY });
     }
-    
     drawables.sort((a, b) => (a.baseY - b.baseY));
     
     for (const d of drawables) {
       if (d.type === 'overlay') {
         const o = d.o;
-        try {
-          if (o.imgType === 'image' && o.img) {
-            image(o.img, d.drawX, d.drawY, o.destW, o.destH);
-          } else if (o.imgType === 'sheet' && o.s) {
-            image(spritesheet, d.drawX, d.drawY, o.destW, o.destH, o.s.x, o.s.y, o.s.w, o.s.h);
-          }
-        } catch (e) { console.warn('[game] draw overlay failed', e); }
+        if (o.imgType === 'image' && o.img) image(o.img, d.drawX, d.drawY, o.destW, o.destH);
+        else if (o.imgType === 'sheet' && o.s) image(spritesheet, d.drawX, d.drawY, o.destW, o.destH, o.s.x, o.s.y, o.s.w, o.s.h);
       } else if (d.type === 'player') {
-        try { drawPlayer(); } catch (e) { console.warn('[game] drawPlayer failed in ordered draw', e); }
+        try { drawPlayer(); } catch (e) {}
       }
     }
-  } catch (e) { console.warn('[game] depth-sorted draw failed', e); }
+  } catch (e) {}
 
-  pop(); 
-
+  // 4. Draw HUD (Scaled automatically now)
   drawDifficultyBadge();
   drawSprintMeter();
   drawClouds();
 
+  // 5. Draw Menu (Scaled automatically now)
   try {
     if (typeof drawInGameMenu === 'function') drawInGameMenu();
-  } catch (e) { console.warn('[game] drawInGameMenu failed', e); }
-
+  } catch (e) {}
   
-  if (!inGameMenuVisible) {
-    updateClouds();
-  }
+  if (!inGameMenuVisible && !settingsOverlayDiv) updateClouds();
 
+  // 6. Draw Debug
   if (EDGE_LAYER_DEBUG && edgeLayer && logicalW && logicalH) {
-    push();
-    noStroke();
-    fill(255, 0, 0, 100);
+    noStroke(); fill(255, 0, 0, 100);
     for (let y = 0; y < logicalH; y++) {
       for (let x = 0; x < logicalW; x++) {
-        const idx = y * logicalW + x;
-        if (edgeLayer[idx]) rect(x * cellSize, y * cellSize, cellSize, cellSize);
+        if (edgeLayer[y * logicalW + x]) rect(x * cellSize, y * cellSize, cellSize, cellSize);
       }
     }
-    pop();
   }
-  
-  try {
-    if (typeof drawInGameMenu === 'function') drawInGameMenu();
-  } catch (e) { console.warn('[game] drawInGameMenu failed', e); }
 
-  
-  if (!inGameMenuVisible) {
-    updateClouds();
-  }
+  pop(); // !!! END GLOBAL SCALING !!!
 }
 
 
@@ -4081,6 +4165,138 @@ function saveLocalSettings() {
   } catch(e) {}
 }
 
+function openInGameSettings(currentVals) {
+  if (settingsOverlayDiv) {
+    // If it's a container from createZoomStablePanel, it might have a .remove() method on the DOM element
+    // But our helper returns an object { close, container }.
+    // If settingsOverlayDiv is just the DOM element, .remove() works.
+    // If we used the helper, we should probably store the object.
+    // For now, let's just remove the DOM element if it exists.
+    settingsOverlayDiv.remove();
+    settingsOverlayDiv = null;
+  }
+
+  // Use the helper
+  const { container, panel, close } = createZoomStablePanel(480, 640, 'gd-settings-overlay');
+  
+  // Store container so we can check if it exists (for pausing)
+  settingsOverlayDiv = container;
+  settingsOverlayPanel = panel;
+  
+  // We need to handle closing properly to stop the zoom loop
+  // We can attach the close function to the container for easy access
+  container.closeZoomPanel = close;
+  container.zoomPanel = panel;
+
+  let title = createDiv('SETTINGS');
+  title.parent(panel);
+  title.style('font-size', '40px'); 
+  title.style('font-weight', 'bold');
+  title.style('margin-bottom', '24px');
+  title.style('color', '#ffcc00');
+  title.style('text-shadow', '3px 3px 0 #000');
+
+  const createSliderRow = (label, val, callback) => {
+    let row = createDiv('');
+    row.parent(panel);
+    row.style('display', 'flex');
+    row.style('flex-direction', 'column');
+    row.style('align-items', 'center');
+    row.style('margin-bottom', '18px');
+    row.style('width', '88%');
+
+    let lbl = createDiv(`${label}: ${Math.floor(val * 100)}%`);
+    lbl.parent(row);
+    lbl.style('font-size', '20px'); 
+    lbl.style('margin-bottom', '8px');
+
+    let slider = createSlider(0, 1, val, 0.01);
+    slider.parent(row);
+    slider.style('width', '100%');
+    slider.style('height', '18px');
+    
+    slider.input(() => {
+      let v = slider.value();
+      lbl.html(`${label}: ${Math.floor(v * 100)}%`);
+      callback(v);
+    });
+  };
+
+  createSliderRow('Master', masterVol, (v) => {
+    masterVol = v;
+    if (gameMusic) gameMusic.setVolume(musicVol * masterVol);
+  });
+
+  createSliderRow('Music', musicVol, (v) => {
+    musicVol = v;
+    if (gameMusic) gameMusic.setVolume(musicVol * masterVol);
+  });
+
+  createSliderRow('SFX', sfxVol, (v) => {
+    sfxVol = v;
+  });
+
+  let diffRow = createDiv('');
+  diffRow.parent(panel);
+  diffRow.style('margin-top', '10px');
+  diffRow.style('text-align', 'center');
+
+  let diffLabel = createDiv('DIFFICULTY');
+  diffLabel.parent(diffRow);
+  diffLabel.style('font-size', '32px');
+  diffLabel.style('margin-bottom', '10px');
+
+  let diffSel = createSelect();
+  diffSel.parent(diffRow);
+  diffSel.style('font-size', '28px');
+  diffSel.style('padding', '8px');
+  diffSel.style('width', '300px');
+  diffSel.style('background', '#333');
+  diffSel.style('color', 'white');
+  diffSel.style('border', '2px solid #666');
+  
+  diffSel.option('Easy', 'easy');
+  diffSel.option('Normal', 'normal');
+  diffSel.option('Hard', 'hard');
+  
+  if (typeof currentDifficulty !== 'undefined') diffSel.selected(currentDifficulty);
+  else diffSel.selected('normal');
+
+  diffSel.changed(() => {
+    let d = diffSel.value();
+    try { setDifficulty(d, { regenerate: false, reason: 'user-settings' }); } 
+    catch(e) { currentDifficulty = d; }
+  });
+
+  let closeBtn = createButton('CLOSE');
+  closeBtn.parent(panel);
+  closeBtn.style('margin-top', '50px');
+  closeBtn.style('font-size', '36px');
+  closeBtn.style('padding', '15px 50px');
+  closeBtn.style('background-color', '#444');
+  closeBtn.style('color', 'white');
+  closeBtn.style('border', '3px solid #888');
+  closeBtn.style('cursor', 'pointer');
+  closeBtn.style('font-family', 'inherit');
+  
+  closeBtn.elt.onmouseover = () => closeBtn.style('background-color', '#666');
+  closeBtn.elt.onmouseout = () => closeBtn.style('background-color', '#444');
+
+  closeBtn.mousePressed(() => {
+    if (container.closeZoomPanel) container.closeZoomPanel();
+    else container.remove();
+    
+    settingsOverlayDiv = null;
+    settingsOverlayPanel = null;
+    
+    // Re-open main menu if it was open?
+    // Or just set inGameMenuVisible = true which now triggers openInGameMenu via Escape?
+    // Actually, if we just set inGameMenuVisible = true, the draw loop won't draw the menu (since I disabled it).
+    // So we must call openInGameMenu().
+    openInGameMenu();
+  });
+}
+
 function attemptStartGameMusic(reason = 'unknown') {
   if (!pendingGameMusicStart || gameMusicStarted || !gameMusic) return;
   console.log(`[game] attemptStartGameMusic reason=${reason}`);
@@ -4153,19 +4369,20 @@ try {
         const active = document && document.activeElement;
         if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) return;
 
-        
         try {
-          const ig = (typeof document !== 'undefined') ? document.getElementById('gd-in-game-settings') : null;
-          if (ig) {
-            try { closeInGameSettings(); } catch (err) { console.warn('[game] closeInGameSettings failed', err); }
-            e.preventDefault();
-            return;
+          if (settingsOverlayDiv) {
+             if (settingsOverlayDiv.closeZoomPanel) settingsOverlayDiv.closeZoomPanel();
+             else settingsOverlayDiv.remove();
+             settingsOverlayDiv = null;
+             openInGameMenu();
+             e.preventDefault();
+             return;
           }
         } catch (err) {  }
 
-        
         try {
-          inGameMenuVisible = !inGameMenuVisible;
+          if (inGameMenuVisible) closeInGameMenu();
+          else openInGameMenu();
           e.preventDefault();
         } catch (err) {
           console.warn('[game] toggling inGameMenuVisible (global handler) failed', err);
@@ -4181,64 +4398,75 @@ function drawDifficultyBadge() {
   const margin = 20;
   const paddingX = 18;
   const paddingY = 10;
-  const vw = virtualW || width;
-  const vh = virtualH || height;
-  const textPx = 24;
+  
+  // FIX: Use virtualW instead of width
+  const vW = virtualW || (width / gameScale); 
+  
   push();
-  textFont(uiFont || 'Arial');
-  textSize(textPx);
-  const textH = textAscent() + textDescent();
-  const boxW = textWidth(label) + paddingX * 2;
-  const boxH = textH + paddingY * 2;
-  const boxX = vw - margin - boxW;
-  const boxY = margin;
-  stroke(255, 80);
-  strokeWeight(2);
-  fill(0, 180);
-  rect(boxX, boxY, boxW, boxH, 14);
+  textSize(24); // Make text larger for 4K view
+  if (uiFont) textFont(uiFont);
+  
+  const tWidth = textWidth(label);
+  const badgeW = tWidth + paddingX * 2;
+  const badgeH = 32 + paddingY * 2;
+  
+  const x = vW - badgeW - margin; // Align to virtual right edge
+  const y = margin;
+
+  fill(0, 0, 0, 150);
   noStroke();
+  rect(x, y, badgeW, badgeH, 8);
+
   fill(255);
-  textAlign(RIGHT, BASELINE);
-  stroke(0, 180);
-  strokeWeight(3);
-  text(label, boxX + boxW - paddingX, boxY + paddingY + textAscent());
-  noStroke();
+  textAlign(CENTER, CENTER);
+  text(label, x + badgeW / 2, y + badgeH / 2);
   pop();
 }
 
 function drawSprintMeter() {
   const now = millis();
   const margin = 20;
-  const vw = virtualW || width;
-  const barWidth = 300;
-  const barHeight = 18;
-  const x = vw - margin - barWidth;
-  const y = margin + 65;
-  let ratio = 0;
-  let barColor = color(0, 200, 255);
-  let label = 'Sprint Ready';
-  if (sprintActive) {
-    ratio = constrain((sprintEndMillis - now) / SPRINT_MAX_DURATION_MS, 0, 1);
-    barColor = color(0, 255, 140);
-    label = 'Sprinting';
-  } else if (now < sprintCooldownUntil) {
-    ratio = 1 - constrain((sprintCooldownUntil - now) / SPRINT_COOLDOWN_MS, 0, 1);
-    barColor = color(255, 180, 0);
-    label = 'Recovering';
-  } else {
-    ratio = 1;
-  }
+  
+  // Use virtual dimensions context
+  const vW = virtualW || (width / gameScale);
+  
+  // Safely check variables
+  if (typeof lastRunTime === 'undefined') lastRunTime = 0;
+  if (typeof sprintEnergy === 'undefined') sprintEnergy = 100;
+
+  // Only draw if player recently ran or is not full stamina
+  if (now - lastRunTime > 2000 && sprintEnergy >= SPRINT_MAX) return;
+
+  const barW = 200; 
+  const barH = 24;
+  
+  // Position: Top-Left (below difficulty badge area if needed)
+  const x = margin;
+  const y = margin + 60; 
+
+  const pct = Math.max(0, Math.min(1, sprintEnergy / SPRINT_MAX));
+
   push();
+  
+  // Background
   noStroke();
-  fill(0, 180);
-  rect(x, y, barWidth, barHeight, 10);
-  fill(barColor);
-  rect(x, y, barWidth * ratio, barHeight, 10);
-  textFont(uiFont || 'Arial');
-  textSize(16);
+  fill(0, 0, 0, 150);
+  rect(x, y, barW, barH, 6);
+
+  // Fill Bar
+  if (pct > 0) {
+    if (sprintEnergy < SPRINT_COST_PER_FRAME * 10) fill(255, 50, 50); // Red if low
+    else fill(255, 215, 0); // Gold normally
+    
+    rect(x + 2, y + 2, (barW - 4) * pct, barH - 4, 4);
+  }
+  
+  // Text Label
   fill(255);
-  textAlign(RIGHT, BOTTOM);
-  text(label, x + barWidth, y - 4);
+  textSize(16);
+  textAlign(LEFT, BOTTOM);
+  text("STAMINA", x, y - 5);
+  
   pop();
 }
 
@@ -4643,19 +4871,20 @@ try {
         const active = document && document.activeElement;
         if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) return;
 
-        
         try {
-          const ig = (typeof document !== 'undefined') ? document.getElementById('gd-in-game-settings') : null;
-          if (ig) {
-            try { closeInGameSettings(); } catch (err) { console.warn('[game] closeInGameSettings failed', err); }
-            e.preventDefault();
-            return;
+          if (settingsOverlayDiv) {
+             if (settingsOverlayDiv.closeZoomPanel) settingsOverlayDiv.closeZoomPanel();
+             else settingsOverlayDiv.remove();
+             settingsOverlayDiv = null;
+             openInGameMenu();
+             e.preventDefault();
+             return;
           }
         } catch (err) {  }
 
-        
         try {
-          inGameMenuVisible = !inGameMenuVisible;
+          if (inGameMenuVisible) closeInGameMenu();
+          else openInGameMenu();
           e.preventDefault();
         } catch (err) {
           console.warn('[game] toggling inGameMenuVisible (global handler) failed', err);
@@ -4737,16 +4966,28 @@ function buildAudioSettings(ctx) {
 function spawnCloud(forceX) {
   if (clouds.length >= MAX_CLOUDS) return;
   
-  
   const validImages = cloudImages.filter(img => img);
   if (validImages.length === 0) return;
   
   const cloudImg = validImages[Math.floor(Math.random() * validImages.length)];
-  const yPos = Math.random() * height * 0.6; 
+  
+  // FIX: Hardcode Map Height (3000px)
+  const worldHeight = 3000; 
+  
+  // Spawn from 0 (Very Top) to 3000 (Very Bottom)
+  // This guarantees coverage everywhere.
+  const minY = 0; 
+  const maxY = worldHeight; 
+  const yPos = minY + Math.random() * (maxY - minY);
+  
+  // DEBUG: Check console to prove it's working
+  // console.log(`Spawning cloud at Y: ${Math.floor(yPos)}`);
+
   const baseSpeed = 0.3 + Math.random() * 1;
   const scale = 2.0 + Math.random() * 4.0;
   
-  
+  // Calculate width based on 3000px height ratio
+  const currentScale = height / 3000; 
   const startX = (typeof forceX === 'number') ? forceX : -cloudImg.width * scale;
 
   clouds.push({
@@ -4801,146 +5042,138 @@ function buildControlsSettings(ctx) {
 function buildAccessibilitySettings(ctx) {
   ctx.addSelectRow("Color Mode", ["None", "Protanopia", "Deuteranopia", "Tritanopia"]);
   
-  
-  const { labelX, controlX, controlWidth, spacingY } = ctx.layout;
-  
-  
-  const lbl = createDiv("Text Size");
-  lbl.class('setting-label');
-  lbl.position(labelX, ctx.y);
-  lbl.size(ctx.layout.labelWidth, 60); 
-  lbl.style('text-align', 'right');
-  lbl.style('color', 'white');
-  lbl.style('font-size', '48px');
-  lbl.style('text-shadow', '3px 3px 0 #000');
-  lbl.style('z-index', '20005');
-  ctx.pushElement(lbl);
+  // Custom row for Text Size
+  const row = createDiv('');
+  row.parent(ctx.container);
+  row.style('display', 'flex');
+  row.style('align-items', 'center');
+  row.style('justify-content', 'space-between');
+  row.style('width', '100%');
+  row.style('margin-bottom', '10px');
+  activeSettingElements.push(row);
 
-  
+  const lbl = createDiv("Text Size");
+  lbl.parent(row);
+  lbl.class('setting-label');
+  lbl.style('color', 'white');
+  lbl.style('font-size', '20px');
+  lbl.style('text-align', 'right'); 
+  lbl.style('text-shadow', '1px 1px 0 #000');
+  lbl.style('margin-right', '10px');
+  lbl.style('flex', '1');
+
+  const btnGroup = createDiv('');
+  btnGroup.parent(row);
+  btnGroup.style('display', 'flex');
+  btnGroup.style('gap', '5px');
+  btnGroup.style('flex', '1');
+
   const sizes = ["Small", "Default", "Big"];
-  const btnGap = 10;
-  
-  const btnW = (controlWidth - (btnGap * (sizes.length - 1))) / sizes.length;
-  let currX = controlX;
-  
   sizes.forEach(size => {
       const btn = createButton(size);
-      btn.position(currX, ctx.y - 10); 
-      btn.size(btnW, 80); 
+      btn.parent(btnGroup);
+      btn.style('flex', '1');
+      btn.style('height', '30px');
       
       stylePixelButton(btn); 
-      btn.style('font-size', '30px'); 
+      btn.style('font-size', '14px'); 
+      btn.style('padding', '0');
       
       btn.mousePressed(() => { console.log("Text size:", size); });
-      ctx.pushElement(btn);
-      currX += btnW + btnGap;
   });
-  
-  ctx.y += spacingY + 30; 
 }
 
 function buildLanguageSettings(ctx) {
   ctx.addSelectRow("Language", ["English", "Spanish", "French", "German"]);
 }
 
-function createSettingsContext({ cx, startY, spacingY }) {
-  let y = startY;
+function createSettingsContext({ container }) {
   
-  
-  
-  const labelWidth = 500;   
-  const controlWidth = 500; 
-  const gap = 40;           
-  
-  const labelX = cx - labelWidth - (gap / 2);
-  const controlX = cx + (gap / 2);
-
   const styleLabel = (el) => {
       el.class('setting-label');
       el.style('color', 'white');
-      el.style('font-size', '45px');
+      el.style('font-size', '20px');
       el.style('text-align', 'right'); 
-      el.style('z-index', '20005');
-      el.style('pointer-events', 'none');
-      el.style('text-shadow', '3px 3px 0 #000');
-      el.style('display', 'flex');
-      el.style('align-items', 'center');
-      el.style('justify-content', 'flex-end');
+      el.style('text-shadow', '1px 1px 0 #000');
+      el.style('margin-right', '10px');
+      el.style('flex', '1');
   };
 
   const styleInput = (el) => {
-      el.style('z-index', '20005');
       el.style('cursor', 'pointer');
+      el.style('flex', '1');
+  };
+
+  const createRow = () => {
+      const row = createDiv('');
+      row.parent(container);
+      row.style('display', 'flex');
+      row.style('align-items', 'center');
+      row.style('justify-content', 'space-between');
+      row.style('width', '100%');
+      row.style('margin-bottom', '10px');
+      activeSettingElements.push(row);
+      return row;
   };
 
   const ctx = {
-    get y() { return y; },
-    set y(value) { y = value; },
-    layout: { labelX, controlX, labelWidth, controlWidth, spacingY },
+    // Mock layout for compatibility if needed, though we should refactor consumers
+    layout: { labelX: 0, controlX: 0, labelWidth: 0, controlWidth: 0, spacingY: 0 },
     
+    container: container, // Expose container
+
     pushElement(el) {
         activeSettingElements.push(el);
         return ctx;
     },
 
     addSliderRow(name, min, max, val, callback) {
-      const lbl = createDiv(name);
-      lbl.position(labelX, y);
-      lbl.size(labelWidth, 60);
-      styleLabel(lbl);
-      activeSettingElements.push(lbl);
+      const row = createRow();
 
-      const slider = createSlider(min, max, val);
-      slider.position(controlX, y + 20); 
-      slider.style('width', (controlWidth * 0.8) + 'px'); 
-      slider.style('height', '30px');
-      styleInput(slider);
+      const lbl = createDiv(name);
+      lbl.parent(row);
+      styleLabel(lbl);
       
-      slider.style('transform', 'scale(2.5)'); 
-      slider.style('transform-origin', 'left center');
+      const slider = createSlider(min, max, val);
+      slider.parent(row);
+      slider.style('width', '100%'); 
+      styleInput(slider);
       
       slider.input(() => callback(slider.value()));
       
-      activeSettingElements.push(slider);
-      y += spacingY;
       return ctx;
     },
 
     addCheckboxRow(name, state) {
-      const cb = createCheckbox(' ' + name, state);
-      
-      cb.position(controlX, y);
-      cb.style('color', 'white');
-      cb.style('font-size', '45px');
-      cb.style('text-shadow', '3px 3px 0 #000');
+      const row = createRow();
+
+      const lbl = createDiv(name);
+      lbl.parent(row);
+      styleLabel(lbl);
+
+      const cb = createCheckbox('', state);
+      cb.parent(row);
       styleInput(cb);
+      cb.style('transform', 'scale(1.5)');
       
-      cb.style('transform', 'scale(2.5)');
-      cb.style('transform-origin', 'left top');
-      
-      
-      
-      
-      activeSettingElements.push(cb);
-      y += spacingY;
       return ctx;
     },
 
     addSelectRow(name, opts, options = {}) {
+      const row = createRow();
+
       const lbl = createDiv(name);
-      lbl.position(labelX, y);
-      lbl.size(labelWidth, 60);
+      lbl.parent(row);
       styleLabel(lbl);
-      activeSettingElements.push(lbl);
 
       const sel = createSelect();
-      sel.position(controlX, y);
-      sel.size(controlWidth * 0.8, 70); 
-      sel.style('font-size', '35px');
+      sel.parent(row);
+      sel.style('font-size', '16px');
       sel.style('background', '#222');
       sel.style('color', 'white');
-      sel.style('border', '4px solid #555'); 
-      sel.style('border-radius', '8px');
+      sel.style('border', '1px solid #555'); 
+      sel.style('border-radius', '4px');
+      sel.style('padding', '5px');
       styleInput(sel);
       
       opts.forEach(opt => sel.option(opt));
@@ -4948,158 +5181,12 @@ function createSettingsContext({ cx, startY, spacingY }) {
       if (options.value) sel.value(options.value);
       if (options.onChange) sel.changed(() => options.onChange(sel.value()));
 
-      activeSettingElements.push(sel);
-      y += spacingY;
       return ctx;
     }
   };
   return ctx;
 }
 
-function openInGameSettings(payload = {}) {
-  closeInGameSettings(); 
-
-  if (payload.masterVol !== undefined) masterVol = payload.masterVol;
-  if (payload.musicVol !== undefined) musicVol = payload.musicVol;
-  if (payload.sfxVol !== undefined) sfxVol = payload.sfxVol;
-  if (payload.difficulty) difficultySetting = payload.difficulty;
-
-  
-  settingsOverlayDiv = createDiv('');
-  settingsOverlayDiv.style('position', 'fixed');
-  settingsOverlayDiv.style('top', '0');
-  settingsOverlayDiv.style('left', '0');
-  settingsOverlayDiv.style('width', '100%');
-  settingsOverlayDiv.style('height', '100%');
-  settingsOverlayDiv.style('background', '#000000'); 
-  settingsOverlayDiv.style('z-index', '20000'); 
-  
-  renderSettingsCategories();
-}
-
-function renderSettingsCategories() {
-  activeSettingElements.forEach(e => e.remove());
-  activeSettingElements = [];
-
-  const menuWidth = 600;       
-  const buttonHeight = 110;  
-  const spacing = 30;          
-  const cx = windowWidth / 2;
-  const cy = windowHeight / 2;
-  
-  const totalMenuH = (SETTINGS_CATEGORIES.length * (buttonHeight + spacing)) + 220; 
-  const startY = cy - (totalMenuH / 2);
-  const xPos = cx - (menuWidth / 2);
-
-  
-  const title = createDiv("SETTINGS");
-  title.style('color', '#ffcc00');
-  title.style('font-size', '100px'); 
-  title.style('font-weight', 'bold');
-  title.style('text-align', 'center');
-  title.style('text-shadow', '6px 6px 0 #333');
-  title.position(cx - 400, startY);
-  title.size(800, 140);
-  title.style('z-index', '20005');
-  activeSettingElements.push(title);
-
-  let currentY = startY + 160;
-
-  
-  SETTINGS_CATEGORIES.forEach((label) => {
-    const btn = createButton(label);
-    btn.position(xPos, currentY);
-    btn.size(menuWidth, buttonHeight);
-    
-    stylePixelButton(btn); 
-    btn.style('font-size', '55px'); 
-    
-    btn.mousePressed(() => {
-       showSubSettingsInGame(label);
-    });
-    
-    activeSettingElements.push(btn);
-    currentY += buttonHeight + spacing;
-  });
-
-  
-  const btnClose = createButton("Close");
-  btnClose.position(xPos, currentY + 50);
-  btnClose.size(menuWidth, buttonHeight);
-  
-  stylePixelButton(btnClose); 
-  btnClose.style('font-size', '55px');
-  btnClose.style('color', '#ff5555'); 
-  
-  btnClose.mousePressed(() => {
-    
-    closeInGameSettings();
-    
-    setTimeout(() => {
-      if (window.parent && window.parent !== window) {
-        window.parent.postMessage({
-          type: 'sync-settings',
-          masterVol, musicVol, sfxVol, difficulty: difficultySetting
-        }, '*');
-      }
-    }, 50);
-  });
-  activeSettingElements.push(btnClose);
-}
-
-function showSubSettingsInGame(label) {
-  activeSettingElements.forEach(e => e.remove());
-  activeSettingElements = [];
-
-  const cx = windowWidth / 2;
-  const cy = windowHeight / 2;
-  
-  
-  const title = createDiv(label);
-  title.style('color', '#ffcc00');
-  title.style('font-size', '80px'); 
-  title.style('font-weight', 'bold');
-  title.style('text-align', 'center');
-  title.style('text-shadow', '5px 5px 0 #333');
-  title.position(cx - 400, 50);
-  title.size(800, 100);
-  title.style('z-index', '20005');
-  activeSettingElements.push(title);
-
-  
-  const startY = 220; 
-  const ctx = createSettingsContext({
-    cx: cx,
-    startY: startY,
-    spacingY: 140
-  });
-
-  const builders = {
-      Audio: buildAudioSettings,
-      Gameplay: buildGameplaySettings,
-      Controls: buildControlsSettings,
-      Accessibility: buildAccessibilitySettings,
-      Language: buildLanguageSettings
-  };
-
-  const builder = builders[label];
-  if (builder) {
-    builder(ctx);
-  }
-
-  
-  const backBtn = createButton("← Back");
-  backBtn.position(cx - 200, windowHeight - 160);
-  backBtn.size(400, 100);
-  
-  stylePixelButton(backBtn); 
-  backBtn.style('font-size', '50px'); 
-  
-  backBtn.mousePressed(() => {
-    renderSettingsCategories(); 
-  });
-  activeSettingElements.push(backBtn);
-}
 
 function ensureLoadingOverlayDom() {
   try {
@@ -5111,24 +5198,26 @@ function ensureLoadingOverlayDom() {
     }
 
     let el = document.getElementById('gd-loading-overlay');
+    
+    // CRITICAL: If the wrapper is missing (old version), remove it so we can rebuild it
+    if (el && !document.getElementById('gd-loading-content')) {
+        el.remove();
+        el = null;
+    }
+
     if (el) return el;
 
-    
-    
+    // --- Inject Styles ---
     const fontPath = 'assets/3-GUI/font.ttf'; 
-
     const styleId = 'gd-loading-style';
     if (!document.getElementById(styleId)) {
       const style = document.createElement('style');
       style.id = styleId;
       style.innerHTML = `
-        @font-face {
-          font-family: 'PixelGameFont';
-          src: url('${fontPath}');
-        }
+        @font-face { font-family: 'PixelGameFont'; src: url('${fontPath}'); }
         #gd-loading-overlay {
           font-family: 'PixelGameFont', 'Courier New', monospace !important;
-          background-color: #000000 !important; /* SOLID BLACK */
+          background-color: #000000 !important;
           color: #ffcc00;
         }
         .gd-loading-message {
@@ -5143,14 +5232,14 @@ function ensureLoadingOverlayDom() {
           max-width: 85%;
           height: 30px;
           border: 4px solid #ffcc00;
-          background-color: #111; /* Dark inner bar */
+          background-color: #111;
           padding: 3px;
           margin-bottom: 10px;
         }
         .gd-progress-fill {
           height: 100%;
           width: 0%;
-          background-color: #ffcc00; /* Yellow Fill */
+          background-color: #ffcc00;
           transition: width 0.1s linear;
         }
         .gd-progress-text {
@@ -5161,15 +5250,23 @@ function ensureLoadingOverlayDom() {
       document.head.appendChild(style);
     }
 
-    
+    // --- Create Elements ---
     el = document.createElement('div');
     el.id = 'gd-loading-overlay';
     Object.assign(el.style, {
       position: 'fixed', top: '0', left: '0', width: '100%', height: '100%',
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-      zIndex: '2147483647',
-      userSelect: 'none',
-      opacity: '1' 
+      zIndex: '2147483647', userSelect: 'none', opacity: '1' 
+    });
+
+    // NEW WRAPPER: This is what we scale down
+    const content = document.createElement('div');
+    content.id = 'gd-loading-content';
+    Object.assign(content.style, {
+        display: 'flex', flexDirection: 'column', 
+        alignItems: 'center', justifyContent: 'center',
+        transformOrigin: 'center center', 
+        transition: 'transform 0.1s ease-out' 
     });
 
     const msg = document.createElement('div');
@@ -5187,78 +5284,43 @@ function ensureLoadingOverlayDom() {
     pct.innerText = '0%';
 
     barCont.appendChild(barFill);
-    el.appendChild(msg);
-    el.appendChild(barCont);
-    el.appendChild(pct);
+    
+    content.appendChild(msg);
+    content.appendChild(barCont);
+    content.appendChild(pct);
+    
+    el.appendChild(content);
     document.body.appendChild(el);
+
+    // Keep loading UI stable across browser zoom
+    makeElementZoomInvariant(content, 'top center');
 
     return el;
   } catch (e) { return null; }
 }
 
-function spawnCloud() {
-  if (clouds.length >= MAX_CLOUDS) return;
-  if (cloudImages.length === 0) return;
-  
-  
-  const cloudIndex = Math.floor(Math.random() * cloudImages.length);
-  const cloudImg = cloudImages[cloudIndex];
-  if (!cloudImg) return;
-  
-  
-  const yPos = Math.random() * height;
-  
-  
-  const baseSpeed = 0.3 + Math.random() * 1; 
-  
-  
-  const scale = 2.0 + Math.random() * 4.0; 
-  
-  
-  const verticalDrift = (Math.random() - 0.5) * 0.15; 
-  
-  
-  const opacity = 180 + Math.random() * 75; 
-  
-  clouds.push({
-    img: cloudImg,
-    x: -cloudImg.width * scale, 
-    y: yPos,
-    baseY: yPos,
-    speed: baseSpeed,
-    scale: scale,
-    opacity: opacity,
-    verticalDrift: verticalDrift,
-    driftPhase: Math.random() * Math.PI * 2 
-  });
-  
-  console.log('[clouds] spawned cloud at y=' + Math.floor(yPos) + ' speed=' + baseSpeed.toFixed(2));
-}
-
 function updateClouds() {
   const now = millis();
-  
   
   if (now - lastCloudSpawn > CLOUD_SPAWN_INTERVAL) {
     spawnCloud();
     lastCloudSpawn = now;
   }
   
-  
+  // Use the game scale so the virtual width matches world units
+  const virtualWidth = (gameScale && gameScale !== 0) ? width / gameScale : width;
+
   for (let i = clouds.length - 1; i >= 0; i--) {
     const cloud = clouds[i];
     
-    
     cloud.x += cloud.speed;
-    
-    
     cloud.driftPhase += 0.01;
     cloud.y = cloud.baseY + Math.sin(cloud.driftPhase) * 20 * cloud.verticalDrift;
     
-    
-    if (cloud.x > width + cloud.img.width * cloud.scale) {
+    // Remove only after the full cloud image has exited the right edge
+    const cloudWidth = cloud.img.width * cloud.scale;
+    if (cloud.x > virtualWidth + cloudWidth) {
       clouds.splice(i, 1);
-      console.log('[clouds] removed off-screen cloud');
     }
   }
 }
