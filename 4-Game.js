@@ -12,6 +12,10 @@ let lastCloudSpawn = 0;
 let showLoadingOverlay = true;
 let overlayMessage = 'Loading map...';
 let lastLoadingScale = null;
+let overlayProgress = 0;
+let overlayProgressActive = false;
+let overlayProgressLastUpdate = 0;
+const LOADING_PROGRESS_RATE = 35;
 
 let inGameMenuVisible = false;
 let inGameMenuButtonRects = []; 
@@ -171,6 +175,30 @@ function enforceCanvasSharpness(ctx) {
   try { ctx.imageSmoothingQuality = 'low'; } catch (e) {}
 }
 
+function startLoadingProgress(value = 0) {
+  overlayProgress = Math.max(0, Math.min(100, value));
+  overlayProgressActive = true;
+  overlayProgressLastUpdate = typeof millis === 'function' ? millis() : Date.now();
+}
+
+function updateLoadingProgressTick() {
+  if (!overlayProgressActive) return;
+  const now = typeof millis === 'function' ? millis() : Date.now();
+  if (!overlayProgressLastUpdate) {
+    overlayProgressLastUpdate = now;
+    return;
+  }
+  const delta = Math.max(0, now - overlayProgressLastUpdate);
+  overlayProgressLastUpdate = now;
+  overlayProgress = Math.min(100, overlayProgress + (delta / 1000) * LOADING_PROGRESS_RATE);
+}
+
+function completeLoadingProgress() {
+  overlayProgress = 100;
+  overlayProgressActive = false;
+  overlayProgressLastUpdate = 0;
+}
+
 const CONTROL_VERTICAL_NUDGE = 8;
 const SELECT_VERTICAL_NUDGE = 15;
 const TEXTSIZE_BUTTON_Y_OFFSET = 10;
@@ -300,6 +328,17 @@ function preload() {
       );
     } catch (e) {}
   }
+
+  Object.entries(DECOR_ASSET_PATHS).forEach(([name, path]) => {
+    try {
+      trackLoadImage(`decor:${name}`, path,
+        (img) => { DECOR_ASSET_IMAGES[name] = img; },
+        (err) => { console.warn('[game] failed to load decor asset', name, err); }
+      );
+    } catch (e) {
+      console.warn('[game] failed to queue decor asset', name, e);
+    }
+  });
   
   uiFont = loadFont(UI_FONT_PATH, () => {}, (err) => {
     console.warn('[game] failed to load UI font', err);
@@ -837,6 +876,7 @@ function generateMap_Part2() {
   renderStartX = renderX; renderStartY = renderY; renderTargetX = renderX; renderTargetY = renderY;
   isMoving = false;
 
+  markDecorObjectsDirty();
   createMapImage();
 
   treeObjects = [];
@@ -1446,6 +1486,7 @@ function applyLoadedMap(obj) {
       terrainLayer = mapStates.slice();
     }
     treeObjects = Array.isArray(obj.treeObjects) ? obj.treeObjects.slice() : [];
+    markDecorObjectsDirty();
 
     counts = {};
     for (let i = 0; i < mapStates.length; i++) counts[mapStates[i]] = (counts[mapStates[i]] || 0) + 1;
@@ -1458,6 +1499,7 @@ function applyLoadedMap(obj) {
     redraw();
     try { mapLoadComplete = true; } catch (e) {}
     try { showLoadingOverlay = false; } catch (e) {}
+    completeLoadingProgress();
     return true;
   } catch (err) {
     console.warn('[game] applyLoadedMap error', err);
@@ -1537,6 +1579,7 @@ function loadMapFromStorage() {
     try { showToast('Loaded saved map', 'info', 2200); } catch (e) {}
     try { mapLoadComplete = true; } catch (e) {}
     try { showLoadingOverlay = false; } catch (e) {}
+    completeLoadingProgress();
     return true;
   } catch (err) {
     console.warn('[game] loadMapFromStorage error', err);
@@ -1595,6 +1638,11 @@ function createMapImage() {
     enforceCanvasSharpness(mapImage.drawingContext);
     mapImage.noSmooth(); 
   } catch(e) {}
+
+    if (decorObjectsDirty) {
+      spawnDecorativeObjects();
+      decorObjectsDirty = false;
+    }
 
   const useSprites = showTextures && spritesheet && spritesheet.width > 1;
   // ... (keep the rest of the existing function logic exactly as is below) ...
@@ -1915,6 +1963,81 @@ function ensureEdgeLayerConnectivity() {
 
 
 
+const DECOR_MAX_DENSITY = 0.07;
+const DECOR_MAX_OBSTACLE_DENSITY = 0.02;
+const DECOR_WALKABLE_SPAWN_CHANCE = 0.06;
+const DECOR_OBSTACLE_SPAWN_CHANCE = 0.025;
+
+function markDecorObjectsDirty() {
+  decorObjectsDirty = true;
+}
+
+function spawnDecorativeObjects() {
+  if (!logicalW || !logicalH || !mapStates) return;
+  decorativeObjects = [];
+  decorativeObstacleTiles = new Set();
+  const grassTiles = [];
+  for (let y = 0; y < logicalH; y++) {
+    for (let x = 0; x < logicalW; x++) {
+      if (getTileState(x, y) === TILE_TYPES.GRASS) {
+        grassTiles.push({ x, y });
+      }
+    }
+  }
+  if (!grassTiles.length) return;
+  const maxDecor = Math.max(4, Math.round(grassTiles.length * DECOR_MAX_DENSITY));
+  const maxObstacles = Math.max(1, Math.round(grassTiles.length * DECOR_MAX_OBSTACLE_DENSITY));
+  let obstaclesPlaced = 0;
+  const ordered = grassTiles.slice();
+  shuffleArray(ordered);
+  const occupied = new Set();
+
+  const placeRandomDecor = (tile, type, pool) => {
+    if (!pool || !pool.length) return false;
+    const name = pool[Math.floor(Math.random() * pool.length)];
+    decorativeObjects.push({ id: name, type, tileX: tile.x, tileY: tile.y });
+    const idx = tile.y * logicalW + tile.x;
+    occupied.add(idx);
+    if (type === 'obstacle') decorativeObstacleTiles.add(idx);
+    return true;
+  };
+
+  for (const tile of ordered) {
+    if (decorativeObjects.length >= maxDecor) break;
+    const tileIdx = tile.y * logicalW + tile.x;
+    if (occupied.has(tileIdx)) continue;
+    const roll = Math.random();
+    if (obstaclesPlaced < maxObstacles && roll < DECOR_OBSTACLE_SPAWN_CHANCE) {
+      if (placeRandomDecor(tile, 'obstacle', DECORATIVE_OBSTACLE_NAMES)) {
+        obstaclesPlaced++;
+      }
+    } else if (roll < DECOR_OBSTACLE_SPAWN_CHANCE + DECOR_WALKABLE_SPAWN_CHANCE) {
+      placeRandomDecor(tile, 'walkable', DECORATIVE_WALKABLE_NAMES);
+    }
+  }
+
+  const anchorX = Math.max(0, Math.min(logicalW - 1, Math.floor(logicalW / 2)));
+  const anchorY = Math.max(0, Math.min(logicalH - 1, Math.floor(logicalH / 2)));
+  const holeCandidates = grassTiles.slice().sort((a, b) => {
+    return (Math.hypot(a.x - anchorX, a.y - anchorY) - Math.hypot(b.x - anchorX, b.y - anchorY));
+  });
+  for (const tile of holeCandidates) {
+    const idx = tile.y * logicalW + tile.x;
+    if (occupied.has(idx)) continue;
+    decorativeObjects.push({ id: DECOR_SPECIAL_NAMES[0], type: 'special', tileX: tile.x, tileY: tile.y });
+    occupied.add(idx);
+    break;
+  }
+}
+
+function shuffleArray(array) {
+  if (!Array.isArray(array) || array.length <= 1) return;
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+}
+
 
 
 
@@ -2061,6 +2184,8 @@ function handleItemInteraction(targetX, targetY) {
 
 function canMoveTo(fromX, fromY, toX, toY) {
   const toState = getTileState(toX, toY);
+  const targetIdx = toY * logicalW + toX;
+  if (decorativeObstacleTiles.has(targetIdx)) return false;
   
   if (typeof TILE_TYPES !== 'undefined' && TILE_TYPES && typeof TILE_TYPES.HILL_NORTH === 'number') {
     const hillMin = TILE_TYPES.HILL_NORTH;
@@ -2960,6 +3085,8 @@ function updateLoadingOverlayDom() {
     if (!el) return;
     
     if (showLoadingOverlay) {
+      if (!overlayProgressActive && overlayProgress < 100) startLoadingProgress();
+      if (overlayProgressActive) updateLoadingProgressTick();
       el.style.display = 'flex';
       el.style.opacity = '1';
       
@@ -2976,6 +3103,7 @@ function updateLoadingOverlayDom() {
           }
       }
     } else {
+      completeLoadingProgress();
       el.style.display = 'none';
       el.style.opacity = '0';
       return; 
@@ -3949,6 +4077,43 @@ const ITEM_DATA = Object.freeze({
   [TILE_TYPES.POWERUP]:{ label: 'POWERUP', spawnRate: 0.003, color: [138, 43, 226] },
 });
 
+const DECOR_ASSET_PATHS = Object.freeze({
+  bush_small_1:    'assets/5-Objects/1-More/bush_small_1.png',
+  flowers_more_1:  'assets/5-Objects/1-More/flower_more_1.png',
+  flowers_pink_1:  'assets/5-Objects/1-More/flower_pink_1.png',
+  flower_yellow:   'assets/5-Objects/1-More/flower_yellow.png',
+  rock_small_1:    'assets/5-Objects/1-More/rock_small_1.png',
+  rock_upward_1:   'assets/5-Objects/1-More/rock_upward_1.png',
+  log_horizontal_1:'assets/5-Objects/1-More/log_horizontal_1.png',
+  log_upward_1:    'assets/5-Objects/1-More/log_upward_1.png',
+  log_vertically_1:'assets/5-Objects/1-More/log_vertically_1.png',
+  bush_upward_1:   'assets/5-Objects/1-More/bush_upward_1.png',
+  hole_1:          'assets/5-Objects/1-More/hole_1.png'
+});
+
+const DECORATIVE_WALKABLE_NAMES = Object.freeze([
+  'bush_small_1',
+  'flowers_more_1',
+  'flowers_pink_1',
+  'flower_yellow',
+  'log_horizontal_1',
+  'rock_small_1',
+  'rock_upward_1'
+]);
+
+const DECORATIVE_OBSTACLE_NAMES = Object.freeze([
+  'bush_upward_1',
+  'log_vertically_1',
+  'log_upward_1'
+]);
+
+const DECOR_SPECIAL_NAMES = Object.freeze(['hole_1']);
+const DECOR_ASSET_IMAGES = {};
+
+let decorativeObjects = [];
+let decorativeObstacleTiles = new Set();
+let decorObjectsDirty = true;
+
 const SPRITES = {
   [TILE_TYPES.GRASS]: { x: 0, y: 0, w: 16, h: 16 },
   [TILE_TYPES.FOREST]: { x: 862, y: 191, w: 32, h: 32, drawW: 64, drawH: 64 },
@@ -3968,7 +4133,7 @@ const TREE_OVERLAY_PATH = 'assets/1-Background/2-Game/1-Forest/tree_1.png';
 let TREE_OVERLAY_IMG = null;
 let treeObjects = []; 
 
-const TREE_SPAWN_CHANCE = 0.0001;
+const TREE_SPAWN_CHANCE = 0.00005; // less dense trees per request
 
 let edgeLayer = null;
 let EDGE_LAYER_ENABLED = false; 
@@ -4179,6 +4344,7 @@ function draw() {
   if (genPhase > 0) {
     if (genPhase === 1) {
       showLoadingOverlay = true;
+      startLoadingProgress(0);
       overlayMessage = 'Initializing World...';
       updateLoadingOverlayDom();
       background(0);
@@ -4200,6 +4366,7 @@ function draw() {
       generateMap_Part2();
       genPhase = 0;
       showLoadingOverlay = false;
+      completeLoadingProgress();
       updateLoadingOverlayDom();
     }
   }
@@ -4253,6 +4420,18 @@ function draw() {
           drawables.push({ type: 'overlay', o, drawX, drawY, baseY });
         }
     }
+    if (Array.isArray(decorativeObjects) && decorativeObjects.length) {
+      for (const deco of decorativeObjects) {
+        const img = DECOR_ASSET_IMAGES[deco.id];
+        if (!img) continue;
+        const destW = img.width || cellSize;
+        const destH = img.height || cellSize;
+        const drawX = deco.tileX * cellSize + Math.floor((cellSize - destW) / 2);
+        const drawY = deco.tileY * cellSize + (cellSize - destH);
+        const baseY = deco.tileY * cellSize + cellSize;
+        drawables.push({ type: 'decor', img, drawX, drawY, destW, destH, baseY });
+      }
+    }
     if (playerPosition) {
       const drawTileX = isMoving ? renderX : playerPosition.x;
       const drawTileY = isMoving ? renderY : playerPosition.y;
@@ -4266,6 +4445,8 @@ function draw() {
         const o = d.o;
         if (o.imgType === 'image' && o.img) image(o.img, d.drawX, d.drawY, o.destW, o.destH);
         else if (o.imgType === 'sheet' && o.s) image(spritesheet, d.drawX, d.drawY, o.destW, o.destH, o.s.x, o.s.y, o.s.w, o.s.h);
+      } else if (d.type === 'decor') {
+        try { if (d.img) image(d.img, d.drawX, d.drawY, d.destW, d.destH); } catch (e) {}
       } else if (d.type === 'player') {
         try { drawPlayer(); } catch (e) {}
       }
