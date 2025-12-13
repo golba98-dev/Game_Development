@@ -135,8 +135,232 @@ let wasInVideoFadeWindow = false;
 let resizeTimeout = null;
 let _menuResizeTimer = null;
 let _menuLastSize = { w: 0, h: 0 };
+let _menuResizeInitialScale = 1;
 
 let skipNextMenuReload = false;
+
+let menuDomParent = null;
+let settingsMenuRoot = null;
+let settingsMenuContent = null;
+let settingsMenuStabilityHandle = null;
+let settingsMenuScaleWrapper = null;
+let settingsMenuZoomHandle = null;
+const BASE_MENU_DPR = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
+let __menuZoomProbeEl = null;
+const zoomNeutralElements = new Set();
+const zoomAwareSliders = new Map();
+
+function getMenuDomParent() {
+  return menuDomParent || document.body;
+}
+
+let _lastMenuRootOffset = { x: null, y: null };
+function watchZoomNeutralElement(el) {
+  if (!el) return;
+  const node = el.elt || el;
+  if (!node || !node.style) return;
+  node.style.transformOrigin = 'top left';
+  node.style.willChange = 'transform';
+  zoomNeutralElements.add(node);
+}
+
+function unwatchZoomNeutralElement(el) {
+  if (!el) return;
+  const node = el.elt || el;
+  if (!node) return;
+  zoomNeutralElements.delete(node);
+}
+
+function registerZoomAwareSlider(el, baseWidth, baseHeight) {
+  if (!el) return;
+  const node = el.elt || el;
+  if (!node) return;
+  zoomAwareSliders.set(node, { baseWidth, baseHeight });
+}
+
+function unregisterZoomAwareSlider(el) {
+  if (!el) return;
+  const node = el.elt || el;
+  if (!node) return;
+  zoomAwareSliders.delete(node);
+}
+function getCurrentMenuZoom() {
+  const vv = window.visualViewport;
+  const viewportScale = vv && vv.scale;
+  if (viewportScale && isFinite(viewportScale) && viewportScale > 0) {
+    return viewportScale;
+  }
+  return estimateMenuBrowserZoom();
+}
+function keepMenuRootStable(el) {
+  if (!el) return () => {};
+  let loopId = null;
+  const update = () => {
+    if (!el || !el.parentNode) return;
+    const vv = window.visualViewport;
+    const offsetX = vv ? (vv.offsetLeft || 0) : 0;
+    const offsetY = vv ? (vv.offsetTop || 0) : 0;
+    const zoom = getCurrentMenuZoom();
+    const safeZoom = (zoom && isFinite(zoom) && zoom > 0) ? zoom : 1;
+    const translateX = offsetX;
+    const translateY = offsetY;
+    el.style.transform = `translate(${-translateX}px, ${-translateY}px)`;
+    el.style.transformOrigin = 'top left';
+    if (_lastMenuRootOffset.x !== translateX || _lastMenuRootOffset.y !== translateY) {
+      console.log('[menu-debug] root translate', { offsetX, offsetY, zoom: safeZoom, translateX, translateY });
+      _lastMenuRootOffset = { x: translateX, y: translateY };
+    }
+    loopId = requestAnimationFrame(update);
+  };
+  update();
+  return () => { if (loopId) cancelAnimationFrame(loopId); };
+}
+
+function keepMenuScaleStable(el) {
+  if (!el) return () => {};
+  let loopId = null;
+  const update = () => {
+    if (!el || !el.parentNode) return;
+    const zoom = getCurrentMenuZoom();
+    const safeZoom = (zoom && isFinite(zoom) && zoom > 0) ? zoom : 1;
+    const clampedZoom = Math.max(0.1, Math.min(10, safeZoom));
+    const inv = 1 / clampedZoom;
+    el.style.transform = `scale(${inv})`;
+    el.style.transformOrigin = 'top left';
+    zoomNeutralElements.forEach(node => {
+      if (!node) return;
+      node.style.transform = `scale(${clampedZoom})`;
+    });
+    zoomAwareSliders.forEach(({ baseWidth, baseHeight }, node) => {
+      if (!node || !baseWidth) return;
+      node.style.width = `${Math.max(0, baseWidth * clampedZoom)}px`;
+      if (baseHeight) {
+        node.style.height = `${Math.max(0, baseHeight * clampedZoom)}px`;
+      }
+    });
+    loopId = requestAnimationFrame(update);
+  };
+  update();
+  return () => { if (loopId) cancelAnimationFrame(loopId); };
+}
+
+function measureMenuZoomViaInch() {
+  try {
+    if (typeof document === 'undefined') return null;
+    if (!__menuZoomProbeEl) {
+      __menuZoomProbeEl = document.createElement('div');
+      __menuZoomProbeEl.id = 'menu-zoom-probe';
+      __menuZoomProbeEl.style.position = 'absolute';
+      __menuZoomProbeEl.style.width = '1in';
+      __menuZoomProbeEl.style.height = '1in';
+      __menuZoomProbeEl.style.left = '-9999px';
+      __menuZoomProbeEl.style.top = '-9999px';
+      __menuZoomProbeEl.style.pointerEvents = 'none';
+      document.body.appendChild(__menuZoomProbeEl);
+    }
+    const rect = __menuZoomProbeEl.getBoundingClientRect();
+    if (!rect || !rect.width) return null;
+    return rect.width / 96;
+  } catch (e) { return null; }
+}
+
+let _menuLastLoggedZoom = null;
+function estimateMenuBrowserZoom() {
+  if (typeof window === 'undefined') return 1;
+  const candidates = [];
+  if (window.outerWidth && window.innerWidth) {
+    const layoutRatio = window.outerWidth / window.innerWidth;
+    if (isFinite(layoutRatio) && layoutRatio > 0) {
+      candidates.push(layoutRatio);
+    }
+  }
+  const vv = window.visualViewport;
+  if (vv && vv.scale) candidates.push(vv.scale);
+  const probeZoom = measureMenuZoomViaInch();
+  if (probeZoom) candidates.push(probeZoom);
+  if (window.devicePixelRatio) {
+    const dprZoom = (window.devicePixelRatio) / (BASE_MENU_DPR || 1);
+    candidates.push(dprZoom);
+  }
+  if (window.outerWidth && window.innerWidth) {
+    candidates.push(window.outerWidth / window.innerWidth);
+  }
+  const zoom = candidates.find(v => v && isFinite(v) && v > 0.05 && v < 20) || 1;
+  const clamped = Math.max(0.1, Math.min(10, zoom));
+  if (!_menuLastLoggedZoom || Math.abs(clamped - _menuLastLoggedZoom) > 0.01) {
+    console.log('[menu-zoom] estimated browser zoom =', clamped, '(candidates', candidates, ')');
+    _menuLastLoggedZoom = clamped;
+  }
+  return clamped;
+}
+
+function ensureSettingsMenuRoot() {
+  if (settingsMenuRoot && settingsMenuContent) {
+    menuDomParent = settingsMenuContent;
+    return settingsMenuContent;
+  }
+  releaseSettingsMenuRoot();
+  settingsMenuRoot = createDiv('');
+  settingsMenuRoot.id('menu-settings-root');
+  settingsMenuRoot.style('position', 'fixed');
+  settingsMenuRoot.style('top', '0');
+  settingsMenuRoot.style('left', '0');
+  settingsMenuRoot.style('width', '100%');
+  settingsMenuRoot.style('height', '100%');
+  settingsMenuRoot.style('z-index', '2147483646');
+  settingsMenuRoot.style('pointer-events', 'none');
+  settingsMenuRoot.style('transform-origin', 'top left');
+  settingsMenuRoot.style('will-change', 'transform');
+  settingsMenuRoot.style('background', 'transparent');
+  settingsMenuRoot.parent(document.body);
+
+  settingsMenuScaleWrapper = createDiv('');
+  settingsMenuScaleWrapper.parent(settingsMenuRoot);
+  settingsMenuScaleWrapper.style('position', 'absolute');
+  settingsMenuScaleWrapper.style('top', '0');
+  settingsMenuScaleWrapper.style('left', '0');
+  settingsMenuScaleWrapper.style('width', '100%');
+  settingsMenuScaleWrapper.style('height', '100%');
+  settingsMenuScaleWrapper.style('pointer-events', 'none');
+  settingsMenuScaleWrapper.style('transform-origin', 'top left');
+  settingsMenuScaleWrapper.style('will-change', 'transform');
+
+  settingsMenuContent = createDiv('');
+  settingsMenuContent.parent(settingsMenuScaleWrapper);
+  settingsMenuContent.style('position', 'absolute');
+  settingsMenuContent.style('top', '0');
+  settingsMenuContent.style('left', '0');
+  settingsMenuContent.style('width', '100%');
+  settingsMenuContent.style('height', '100%');
+  settingsMenuContent.style('pointer-events', 'auto');
+  settingsMenuContent.style('display', 'block');
+
+  settingsMenuStabilityHandle = keepMenuRootStable(settingsMenuRoot.elt);
+  settingsMenuZoomHandle = keepMenuScaleStable(settingsMenuScaleWrapper.elt);
+  menuDomParent = settingsMenuContent;
+  return settingsMenuContent;
+}
+
+function releaseSettingsMenuRoot() {
+  menuDomParent = null;
+  if (settingsMenuStabilityHandle) {
+    settingsMenuStabilityHandle();
+    settingsMenuStabilityHandle = null;
+  }
+  if (settingsMenuZoomHandle) {
+    settingsMenuZoomHandle();
+    settingsMenuZoomHandle = null;
+  }
+  if (settingsMenuRoot) {
+    settingsMenuRoot.remove();
+    settingsMenuRoot = null;
+  }
+  if (settingsMenuScaleWrapper) {
+    settingsMenuScaleWrapper.remove();
+    settingsMenuScaleWrapper = null;
+  }
+  settingsMenuContent = null;
+}
 
 function preload() {
   rectSkin = loadImage("assets/1-Background/1-Menu/Settings_Background.png");
@@ -460,6 +684,7 @@ function fadeTo(callback) {
 
 function showSettingsMenu() {
   clearSubSettings();
+  ensureSettingsMenuRoot();
 
   const cx = width / 2;
   const cy = height / 2;
@@ -579,6 +804,7 @@ function showSubSettings(label) {
 
 function makeBtn(label, x, y, w, h, cb) {
   const b = createButton(label);
+  b.parent(getMenuDomParent());
   b.size(w, h).position(x, y);
   styleButton(b);
   b.mousePressed(cb);
@@ -587,6 +813,7 @@ function makeBtn(label, x, y, w, h, cb) {
 
 function createBgImg(path, x, y, w, h, zIndex = '9998') {
   const img = createImg(path, '');
+  img.parent(getMenuDomParent());
   img.size(w, h).position(x, y);
   img.style('pointer-events', 'none');
   img.style('z-index', zIndex);
@@ -596,14 +823,16 @@ function createBgImg(path, x, y, w, h, zIndex = '9998') {
 
 function makeSmallBtn(label, x, y, w, h, cb) {
   const b = createButton(label);
+  b.parent(getMenuDomParent());
   b.size(w, h).position(x, y);
   styleSmallButton(b);
   b.mousePressed(cb);
   return b;
 }
 
-function createSettingLabel(txt, x, y, maxWidth = 200) {
+function createSettingLabel(txt, x, y, maxWidth = 200, parentEl = null) {
   const d = createDiv(txt);
+  d.parent(parentEl || getMenuDomParent());
   d.position(x, y);
   d.style("color", "white");
   d.style("font-size", (0.035 * height) + "px");
@@ -619,6 +848,7 @@ function createSettingLabel(txt, x, y, maxWidth = 200) {
 
 
 function createSettingsContext(layout) {
+  const domParent = settingsMenuContent || getMenuDomParent();
   return {
     layout: layout,
     y: layout.startY,
@@ -627,15 +857,17 @@ function createSettingsContext(layout) {
 
     addSliderRow(labelText, min, max, currentVal, onChange, opts) {
       const labelWidth = Math.max(120, Math.min(260, this.layout.controlX - this.layout.labelX - 12));
-      this.pushElement(createSettingLabel(labelText, this.layout.labelX, this.y, labelWidth));
+      this.pushElement(createSettingLabel(labelText, this.layout.labelX, this.y, labelWidth, domParent));
 
       const slider = createSlider(min, max, currentVal);
+      slider.parent(domParent);
 
       slider.position(this.layout.controlX, this.y);
       const sliderWidth = Math.max(200, Math.round(this.layout.controlWidth * 0.82));
       slider.style('width', sliderWidth + 'px');
       slider.style('height', '26px');
       slider.style('z-index', '20000');
+      registerZoomAwareSlider(slider, sliderWidth, 26);
       
       if (opts && opts.isAudio) {
         slider.attribute('data-setting', labelText === "Master Volume" ? "masterVol" : 
@@ -650,13 +882,15 @@ function createSettingsContext(layout) {
 
     addCheckboxRow(labelText, isChecked, onChange) {
       const labelWidth = Math.max(120, Math.min(260, this.layout.controlX - this.layout.labelX - 12));
-      this.pushElement(createSettingLabel(labelText, this.layout.labelX, this.y, labelWidth));
+      this.pushElement(createSettingLabel(labelText, this.layout.labelX, this.y, labelWidth, domParent));
 
       const chk = createCheckbox('', isChecked);
+      chk.parent(domParent);
 
       const checkboxOffset = Math.round(this.layout.spacingY * 0.05);
       chk.position(this.layout.controlX, this.y - checkboxOffset);
       chk.style('z-index', '20000');
+      watchZoomNeutralElement(chk);
  
       if(chk.elt) chk.elt.classList.add('setting-checkbox');
 
@@ -669,9 +903,10 @@ function createSettingsContext(layout) {
 
     addSelectRow(labelText, options, config) {
       const labelWidth = Math.max(120, Math.min(260, this.layout.controlX - this.layout.labelX - 12));
-      this.pushElement(createSettingLabel(labelText, this.layout.labelX, this.y, labelWidth));
+      this.pushElement(createSettingLabel(labelText, this.layout.labelX, this.y, labelWidth, domParent));
 
       const sel = createSelect();
+      sel.parent(domParent);
       const selectWidth = Math.min(this.layout.controlWidth * 0.72, 360);
       const selectHeight = Math.max(42, Math.round(this.layout.spacingY * 0.6));
       sel.position(this.layout.controlX, this.y);
@@ -683,6 +918,7 @@ function createSettingsContext(layout) {
       sel.style('border', '2px solid #555');
       sel.style('border-radius', '5px');
       sel.style('padding', '10px 12px');
+      watchZoomNeutralElement(sel);
 
       options.forEach(opt => sel.option(opt));
 
@@ -758,6 +994,7 @@ function buildAccessibilitySettings(ctx) {
   const { labelX, controlX, controlWidth, panelH, spacingY } = ctx.layout;
   
   const lbl = createDiv("Text Size");
+  lbl.parent(getMenuDomParent());
   lbl.class('setting-label');
   const labelWidth = Math.max(120, controlX - labelX - 20);
   lbl.position(labelX, ctx.y + TEXTSIZE_BUTTON_Y_OFFSET);
@@ -781,6 +1018,7 @@ function buildAccessibilitySettings(ctx) {
   let currX = controlX;
   sizes.forEach(item => {
       const btn = createButton(item.label);
+      btn.parent(getMenuDomParent());
       btn.position(currX, ctx.y + TEXTSIZE_BUTTON_Y_OFFSET);
       btn.size(btnW, btnH);
 
@@ -844,7 +1082,13 @@ function syncSlidersToSettings() {
 }
 
 function clearSubSettings() {
-  activeSettingElements.forEach(e => e && e.remove());
+  activeSettingElements.forEach(e => {
+    unwatchZoomNeutralElement(e);
+    if (e && e.elt && e.elt.tagName === 'INPUT' && e.elt.type === 'range') {
+      unregisterZoomAwareSlider(e);
+    }
+    e && e.remove();
+  });
   activeSettingElements = [];
 }
 
@@ -863,10 +1107,12 @@ function showMainMenu() {
 }
 
 function hideSettingsMenu() {
+  clearSubSettings();
   [...categoryBackgrounds, ...categoryButtons, saveBackground, btnSave, backMenuBackground, btnBackMenu]
     .forEach(e => e && e.remove());
   categoryBackgrounds = [];
   categoryButtons = [];
+  releaseSettingsMenuRoot();
 }
 
 function applyVolumes() {
@@ -1133,6 +1379,8 @@ function draw() {
 function windowResized() {
   try { clearTimeout(_menuResizeTimer); } catch (e) {}
   _menuLastSize = { w: window.innerWidth, h: window.innerHeight };
+  const vv = window.visualViewport;
+  _menuResizeInitialScale = vv ? (vv.scale || 1) : 1;
   _menuResizeTimer = setTimeout(() => {
     try {
       
@@ -1153,14 +1401,20 @@ function windowResized() {
     }
 
     
-    if (_menuLastSize.w === window.innerWidth && _menuLastSize.h === window.innerHeight) {
+    const vvNow = window.visualViewport;
+    const currentScale = vvNow ? (vvNow.scale || 1) : 1;
+    const matchesSize = (_menuLastSize.w === window.innerWidth && _menuLastSize.h === window.innerHeight);
+    if (matchesSize) {
+      if (Math.abs(currentScale - _menuResizeInitialScale) > 0.01) {
+        console.log('[menu] resize ignored because only zoom/viewport scale changed', { oldScale: _menuResizeInitialScale, newScale: currentScale });
+        return;
+      }
       try {
         location.reload();
       } catch (e) {
         console.warn('[menu] failed to reload after resize', e);
       }
     } else {
-     
       windowResized();
     }
   }, 200);
