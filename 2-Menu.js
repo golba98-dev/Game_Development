@@ -466,13 +466,14 @@ function showSettingsMenu() {
   const panelW = 0.7 * width;
   const panelH = 0.7 * height;
 
-  const leftPanelX = cx - panelW / 2 + 150;
-  const categoryButtonWidth = 0.2 * width;
-  const categoryButtonHeight = 0.07 * height;
-  const categorySpacing = 0.09 * height;
-  const yOffset = -0.10 * height + 120;
+  const panelLeft = cx - panelW / 2;
+  const leftPanelX = panelLeft + panelW * 0.04;
+  const categoryButtonWidth = Math.min(panelW * 0.33, width * 0.35);
+  const categoryButtonHeight = panelH * 0.09;
+  const categorySpacing = categoryButtonHeight + panelH * 0.03;
+  const yOffset = -panelH * 0.08;
   const totalH = (SETTINGS_CATEGORIES.length - 1) * categorySpacing;
-  const yStart = cy - totalH / 2 - 10 + yOffset - 50;
+  const yStart = cy - totalH / 2 + yOffset;
 
   categoryBackgrounds = [];
   categoryButtons = [];
@@ -492,21 +493,34 @@ function showSettingsMenu() {
   });
 
   const secondaryButtonHeight = categoryButtonHeight * 0.75;
-  const baseBottom = cy + panelH / 2 - secondaryButtonHeight - 80;
+  const baseBottom = cy + panelH / 2 - secondaryButtonHeight - Math.round(panelH * 0.05);
   const leftThird = width / 3;
   const rightThird = (width / 3) * 2;
 
-  saveBackground = createBgImg("assets/3-GUI/Button BG.png", leftThird - categoryButtonWidth * 0.4, baseBottom, categoryButtonWidth * 0.8, secondaryButtonHeight);
-  btnSave = makeSmallBtn("💾 Save", leftThird - categoryButtonWidth * 0.4, baseBottom, categoryButtonWidth * 0.8, secondaryButtonHeight, saveSettings);
+  const bottomButtonW = Math.max(categoryButtonWidth * 0.9, panelW * 0.18);
+  const saveX = leftThird - bottomButtonW / 2;
+  const backX = rightThird - bottomButtonW / 2;
 
-  backMenuBackground = createBgImg("assets/3-GUI/Button BG.png", rightThird - categoryButtonWidth * 0.4, baseBottom, categoryButtonWidth * 0.8, secondaryButtonHeight);
-  btnBackMenu = makeSmallBtn("↩ Back to Menu", rightThird - categoryButtonWidth * 0.4, baseBottom, categoryButtonWidth * 0.8, secondaryButtonHeight, () => {
+  saveBackground = createBgImg("assets/3-GUI/Button BG.png", saveX, baseBottom, bottomButtonW, secondaryButtonHeight);
+  btnSave = makeSmallBtn("💾 Save", saveX, baseBottom, bottomButtonW, secondaryButtonHeight, saveSettings);
+
+  backMenuBackground = createBgImg("assets/3-GUI/Button BG.png", backX, baseBottom, bottomButtonW, secondaryButtonHeight);
+  btnBackMenu = makeSmallBtn("↩ Back to Menu", backX, baseBottom, bottomButtonW, secondaryButtonHeight, () => {
       playClickSFX();
       showingSettings = false;
       clearSubSettings();
       hideSettingsMenu();
       showMainMenu();
-    });
+  });
+
+  try {
+    if (btnBackMenu && btnBackMenu.elt) {
+      btnBackMenu.elt.style.whiteSpace = 'nowrap';
+    }
+    if (btnSave && btnSave.elt) {
+      btnSave.elt.style.whiteSpace = 'nowrap';
+    }
+  } catch (e) {}
 
   applyCurrentTextSize();
 }
@@ -531,15 +545,10 @@ function showSubSettings(label) {
   
   
   
-  const controlX = panelLeft + (panelW * 0.35);
-  
-  
-  const controlWidth = panelW * 0.55; 
-  
-  
   const labelX = panelLeft + (panelW * 0.05);
-  
-  const spacingY = panelH * 0.14;
+  const controlX = panelLeft + (panelW * 0.42);
+  const controlWidth = panelW * 0.52;
+  const spacingY = Math.max(panelH * 0.17, 90);
 
   const ctx = createSettingsContext({
     labelX, 
@@ -557,8 +566,8 @@ function showSubSettings(label) {
 
   const backY = cy + panelH / 2 - panelH * 0.12;
   const backWidth = panelW * 0.3;
-  const backBG = createBgImg("assets/3-GUI/Button BG.png", cx - backWidth / 2, backY - BACK_BUTTON_VERTICAL_OFFSET, backWidth, panelH * 0.08, '3');
-  const backBtn = makeSmallBtn("← Back", cx - backWidth / 2, backY - BACK_BUTTON_VERTICAL_OFFSET, backWidth, panelH * 0.08, () => {
+  const backBG = createBgImg("assets/3-GUI/Button BG.png", cx - backWidth / 2, backY, backWidth, panelH * 0.08, '3');
+  const backBtn = makeSmallBtn("← Back", cx - backWidth / 2, backY, backWidth, panelH * 0.08, () => {
     playClickSFX();
     clearSubSettings();
     showSettingsMenu();
@@ -617,12 +626,15 @@ function createSettingsContext(layout) {
     pushElement(el) { activeSettingElements.push(el); },
 
     addSliderRow(labelText, min, max, currentVal, onChange, opts) {
-      this.pushElement(createSettingLabel(labelText, this.layout.labelX, this.y));
+      const labelWidth = Math.max(120, Math.min(260, this.layout.controlX - this.layout.labelX - 12));
+      this.pushElement(createSettingLabel(labelText, this.layout.labelX, this.y, labelWidth));
 
       const slider = createSlider(min, max, currentVal);
 
-      slider.position(this.layout.controlX, this.y + 20); 
-      slider.style('width', this.layout.controlWidth + 'px');
+      slider.position(this.layout.controlX, this.y);
+      const sliderWidth = Math.max(200, Math.round(this.layout.controlWidth * 0.82));
+      slider.style('width', sliderWidth + 'px');
+      slider.style('height', '26px');
       slider.style('z-index', '20000');
       
       if (opts && opts.isAudio) {
@@ -637,11 +649,13 @@ function createSettingsContext(layout) {
     },
 
     addCheckboxRow(labelText, isChecked, onChange) {
-      this.pushElement(createSettingLabel(labelText, this.layout.labelX, this.y));
+      const labelWidth = Math.max(120, Math.min(260, this.layout.controlX - this.layout.labelX - 12));
+      this.pushElement(createSettingLabel(labelText, this.layout.labelX, this.y, labelWidth));
 
       const chk = createCheckbox('', isChecked);
 
-      chk.position(this.layout.controlX, this.y + 10); 
+      const checkboxOffset = Math.round(this.layout.spacingY * 0.05);
+      chk.position(this.layout.controlX, this.y - checkboxOffset);
       chk.style('z-index', '20000');
  
       if(chk.elt) chk.elt.classList.add('setting-checkbox');
@@ -654,18 +668,21 @@ function createSettingsContext(layout) {
     },
 
     addSelectRow(labelText, options, config) {
-      this.pushElement(createSettingLabel(labelText, this.layout.labelX, this.y));
+      const labelWidth = Math.max(120, Math.min(260, this.layout.controlX - this.layout.labelX - 12));
+      this.pushElement(createSettingLabel(labelText, this.layout.labelX, this.y, labelWidth));
 
       const sel = createSelect();
-      sel.position(this.layout.controlX, this.y - 5);
-      sel.size(this.layout.controlWidth, 100); 
+      const selectWidth = Math.min(this.layout.controlWidth * 0.72, 360);
+      const selectHeight = Math.max(42, Math.round(this.layout.spacingY * 0.6));
+      sel.position(this.layout.controlX, this.y);
+      sel.size(selectWidth, selectHeight);
       sel.style('font-size', '24px');
       sel.style('z-index', '20000');
       sel.style('background', '#222');
       sel.style('color', 'white');
       sel.style('border', '2px solid #555');
       sel.style('border-radius', '5px');
-      sel.style('padding-left', '10px');
+      sel.style('padding', '10px 12px');
 
       options.forEach(opt => sel.option(opt));
 
@@ -742,8 +759,9 @@ function buildAccessibilitySettings(ctx) {
   
   const lbl = createDiv("Text Size");
   lbl.class('setting-label');
-  lbl.position(labelX - 50, ctx.y + 30);
-  lbl.style('width', '350px');
+  const labelWidth = Math.max(120, controlX - labelX - 20);
+  lbl.position(labelX, ctx.y + TEXTSIZE_BUTTON_Y_OFFSET);
+  lbl.style('width', labelWidth + 'px');
   lbl.style('text-align', 'right');
   lbl.style('color', 'white');
   lbl.style('font-size', (0.035 * height) + 'px');
@@ -757,27 +775,23 @@ function buildAccessibilitySettings(ctx) {
     { label: "Big", val: 100 }
   ];
   
-  const gap = 15;
+  const gap = Math.max(10, Math.round(panelH * 0.02));
   const btnW = (controlWidth - (gap * (sizes.length - 1))) / sizes.length;
-  
-  
-  const btnH = 100; 
-  
+  const btnH = Math.max(48, Math.round(panelH * 0.12));
   let currX = controlX;
-  
   sizes.forEach(item => {
       const btn = createButton(item.label);
-      btn.position(currX, ctx.y);
+      btn.position(currX, ctx.y + TEXTSIZE_BUTTON_Y_OFFSET);
       btn.size(btnW, btnH);
-      
+
       styleButton(btn);
       btn.style('background', '#333'); 
       btn.style('border', '4px solid #555'); 
-      btn.style('border-radius', '15px');    
-      btn.style('font-size', '36px');        
-      btn.style('font-weight', 'bold');      
+      btn.style('border-radius', '15px');
+      btn.style('font-size', Math.max(16, Math.round(btnH * 0.35)) + 'px');
+      btn.style('font-weight', 'bold');
       btn.style('z-index', '20005');
-      
+
       btn.attribute('data-text-size-val', item.val);
 
       btn.mousePressed(() => { 
@@ -786,13 +800,13 @@ function buildAccessibilitySettings(ctx) {
         applyCurrentTextSize();
         saveAllSettings();
       });
-      
+
       ctx.pushElement(btn);
       currX += btnW + gap;
   });
-  
+
   setTimeout(updateTextSizeButtonStyles, 50);
-  ctx.y += spacingY + 50; 
+  ctx.y += spacingY + btnH * 0.6; 
 }
 
 function buildLanguageSettings(ctx) {
@@ -1212,7 +1226,7 @@ function injectCustomStyles() {
     /* The Track */
     input[type="range"]::-webkit-slider-runnable-track {
       width: 100%;
-      height: 30px !important;    /* Thicker Track */
+      height: 26px !important;
       cursor: pointer;
       background: #222;
       border: 3px solid #555;
@@ -1222,8 +1236,8 @@ function injectCustomStyles() {
     /* The Handle (Thumb) - THE BUTTON YOU DRAG */
     input[type="range"]::-webkit-slider-thumb {
       -webkit-appearance: none;
-      height: 55px !important;    /* GIANT HEIGHT */
-      width: 55px !important;     /* GIANT WIDTH */
+      height: 38px !important;
+      width: 38px !important;
       background: #ffcc00;        
       border: 4px solid white;
       border-radius: 10px;        /* Slightly rounded square */
@@ -1237,14 +1251,17 @@ function injectCustomStyles() {
     input[type="checkbox"] {
       appearance: none;
       -webkit-appearance: none;
-      width: 60px !important;   /* Made even bigger (60px) */
-      height: 60px !important;
+      width: 38px !important;
+      height: 38px !important;
       background-color: #333;
-      border: 4px solid #888;
-      border-radius: 10px;
+      border: 3px solid #888;
+      border-radius: 8px;
       cursor: pointer;
-      display: inline-block;
+      position: relative;
       vertical-align: middle;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
     }
 
     input[type="checkbox"]:checked {
@@ -1254,7 +1271,7 @@ function injectCustomStyles() {
 
     input[type="checkbox"]:checked::after {
       content: '✔';
-      font-size: 45px;
+      font-size: 28px;
       color: black;
       font-weight: bold;
       position: absolute;
@@ -1262,6 +1279,10 @@ function injectCustomStyles() {
       left: 50%;
       transform: translate(-50%, -55%);
       line-height: 1;
+    }
+
+    .setting-checkbox {
+      margin-left: 12px;
     }
 
     /* Button Hover */

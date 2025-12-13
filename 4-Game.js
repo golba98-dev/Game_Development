@@ -27,6 +27,9 @@ let settingsOverlayPanel = null;
 
 const MENU_BUTTON_TEXTURE_PATH = 'assets/3-GUI/Button BG.png';
 const SETTINGS_PANEL_TEXTURE_PATH = 'assets/1-Background/1-Menu/Settings_Background.png';
+const MENU_GOLD_COLOR = '#b8860b';
+const MENU_GOLD_BORDER = 'rgba(184,134,11,0.65)';
+const MENU_GOLD_GLOW = 'rgba(184,134,11,0.35)';
 
 const SETTINGS_CATEGORIES = Object.freeze(["Audio", "Gameplay", "Controls", "Accessibility", "Language"]);
 const DEFAULT_SETTINGS = Object.freeze({
@@ -373,12 +376,16 @@ function setup() {
 
   try { injectCustomStyles(); } catch (e) {}
   
+  loadLocalSettings();
   const urlParams = new URLSearchParams(window.location.search);
-  masterVol = parseFloat(urlParams.get('masterVol')) || 0.8;
-  musicVol = parseFloat(urlParams.get('musicVol')) || 0.6;
-  sfxVol = parseFloat(urlParams.get('sfxVol')) || 0.7;
+  const urlMasterVol = parseFloat(urlParams.get('masterVol'));
+  const urlMusicVol = parseFloat(urlParams.get('musicVol'));
+  const urlSfxVol = parseFloat(urlParams.get('sfxVol'));
+  if (!Number.isNaN(urlMasterVol)) masterVol = urlMasterVol;
+  if (!Number.isNaN(urlMusicVol)) musicVol = urlMusicVol;
+  if (!Number.isNaN(urlSfxVol)) sfxVol = urlSfxVol;
   const urlDifficulty = urlParams.get('difficulty');
-  setDifficulty(urlDifficulty, { regenerate: false, reason: 'url-param' });
+  if (urlDifficulty) setDifficulty(urlDifficulty, { regenerate: false, reason: 'url-param' });
   
   const urlRiverClear = (urlParams.get('riverClear') || '').toLowerCase();
   if (urlRiverClear === RIVER_CLEAR_MODES.ALWAYS || urlRiverClear === 'true') {
@@ -2484,16 +2491,16 @@ function createZoomStablePanel(w, h, id) {
   panel.parent(container);
   panel.style('width', `${w}px`);
   panel.style('height', `${h}px`);
-  panel.style('background-color', 'rgba(30, 30, 35, 0.95)');
-  panel.style('border', '4px solid #444');
-  panel.style('border-radius', '16px');
+  panel.style('background-color', 'rgba(18, 18, 23, 0.95)');
+  panel.style('border', `2px solid ${MENU_GOLD_BORDER}`);
+  panel.style('border-radius', '6px');
   panel.style('display', 'flex');
   panel.style('flex-direction', 'column');
   panel.style('align-items', 'center');
   panel.style('justify-content', 'center');
   panel.style('font-family', '"Courier New", monospace');
   panel.style('color', 'white');
-  panel.style('box-shadow', '0 0 40px rgba(0,0,0,0.8)');
+  panel.style('box-shadow', `0 0 18px rgba(0,0,0,0.85), inset 0 0 0 2px ${MENU_GOLD_BORDER}`);
   panel.style('transform', 'none');
   
   let zoomLoopId = null;
@@ -2538,7 +2545,7 @@ function openInGameMenu() {
   title.style('font-size', '48px');
   title.style('font-weight', 'bold');
   title.style('margin-bottom', '40px');
-  title.style('color', '#ffcc00');
+  title.style('color', MENU_GOLD_COLOR);
   title.style('text-shadow', '3px 3px 0 #000');
 
   const createMenuBtn = (label, onClick) => {
@@ -2709,30 +2716,42 @@ function styleButton(btn) {
   btn.style("font-family", "MyFont, sans-serif");
 }
 
+function applySettingsTabSkin(btn) {
+  if (!btn || !btn.elt) return;
+  stylePixelButton(btn);
+  btn.style('width', '100%');
+  btn.style('height', '54px');
+  btn.style('padding', '0');
+  btn.style('font-size', '20px');
+  btn.style('letter-spacing', '0.2px');
+  btn.style('border-radius', '2px');
+  btn.style('box-shadow', '0 6px 14px rgba(0,0,0,0.6)');
+  btn.style('transition', 'filter 0.15s ease, transform 0.1s ease, box-shadow 0.2s ease');
+  if (btn.elt) {
+    btn.elt.dataset.settingsActive = 'false';
+    btn.elt.dataset.baseShadow = btn.style('box-shadow') || '';
+  }
+}
+
 function applyMenuButtonUI(btn, w = 260, h = 48) {
   if (!btn || !btn.elt) return;
+  stylePixelButton(btn);
   btn.style('width', `${w}px`);
   btn.style('height', `${h}px`);
   btn.style('font-size', '28px');
   btn.style('font-family', 'inherit');
-  btn.style('border', '3px solid rgba(0,0,0,0.3)');
+  btn.style('font-weight', 'bold');
+  btn.style('letter-spacing', '0.4px');
+  btn.style('border', `3px solid ${MENU_GOLD_BORDER}`);
   btn.style('color', '#fff');
-  btn.style('text-shadow', '0 0 12px rgba(0,0,0,0.9)');
-  btn.style('background-image', `url('${MENU_BUTTON_TEXTURE_PATH}')`);
-  btn.style('background-size', 'cover');
-  btn.style('background-position', 'center');
-  btn.style('background-repeat', 'no-repeat');
+  btn.style('text-shadow', `0 0 10px ${MENU_GOLD_GLOW}`);
   btn.style('cursor', 'pointer');
   btn.style('padding', '0');
   btn.style('display', 'flex');
   btn.style('align-items', 'center');
   btn.style('justify-content', 'center');
-  btn.style('box-shadow', '0 8px 20px rgba(0,0,0,0.6)');
-  const applyHover = (ev, hover) => {
-    btn.style('filter', hover ? 'brightness(1.15)' : 'none');
-  };
-  btn.elt.onmouseover = () => applyHover(null, true);
-  btn.elt.onmouseout = () => applyHover(null, false);
+  btn.style('border-radius', '2px');
+  btn.style('box-shadow', '0 8px 28px rgba(0,0,0,0.75)');
 }
 
 function decorateSettingsPanel(panel) {
@@ -2741,8 +2760,13 @@ function decorateSettingsPanel(panel) {
   panel.style('background-image', `url('${SETTINGS_PANEL_TEXTURE_PATH}')`);
   panel.style('background-size', 'cover');
   panel.style('background-position', 'center');
-  panel.style('border', '4px solid rgba(255,255,255,0.3)');
+  panel.style('border', `4px solid ${MENU_GOLD_BORDER}`);
   panel.style('box-shadow', '0 0 50px rgba(0,0,0,0.95)');
+  panel.style('padding', '28px');
+  panel.style('box-sizing', 'border-box');
+  panel.style('justify-content', 'space-between');
+  panel.style('gap', '18px');
+  panel.style('border-radius', '12px');
 }
 
 function playClickSFX() {
@@ -2764,6 +2788,8 @@ function closeInGameSettings() {
     settingsOverlayDiv = null;
     settingsOverlayPanel = null;
   }
+
+  clearSubSettings();
 }
 
 ['pointerdown', 'keydown'].forEach((evt) => {
@@ -4230,142 +4256,224 @@ window.addEventListener('message', (ev) => {
   }
 }, false);
 
-function saveLocalSettings() {
-  try {
-    const settings = { masterVol, musicVol, sfxVol, textSizeSetting, difficulty: difficultySetting };
-    localStorage.setItem("menuSettings", JSON.stringify(settings));
-    
-    if (window.parent && window.parent !== window) {
-      window.parent.postMessage({ type: 'sync-settings', ...settings }, '*');
+let _settingsSaveTimer = null;
+
+function persistSavedSettings(immediate = false) {
+  const commit = () => {
+    try {
+      const settings = { masterVol, musicVol, sfxVol, textSizeSetting, difficulty: difficultySetting };
+      localStorage.setItem('menuSettings', JSON.stringify(settings));
+      verboseLog('[game] persisted settings', settings);
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: 'sync-settings', ...settings }, '*');
+      }
+    } catch (err) {
+      console.warn('[game] persistSavedSettings failed', err);
     }
-  } catch(e) {}
+  };
+
+  if (_settingsSaveTimer) {
+    clearTimeout(_settingsSaveTimer);
+    _settingsSaveTimer = null;
+  }
+
+  if (immediate) {
+    commit();
+    return;
+  }
+
+  _settingsSaveTimer = setTimeout(() => {
+    commit();
+    _settingsSaveTimer = null;
+  }, 500);
+}
+
+function saveLocalSettings() {
+  persistSavedSettings(true);
+}
+
+function saveLocalSettingsDebounced() {
+  persistSavedSettings(false);
+}
+
+function loadLocalSettings() {
+  try {
+    const stored = localStorage.getItem('menuSettings');
+    if (!stored) return;
+    const parsed = JSON.parse(stored);
+    if (typeof parsed.masterVol === 'number') masterVol = parsed.masterVol;
+    if (typeof parsed.musicVol === 'number') musicVol = parsed.musicVol;
+    if (typeof parsed.sfxVol === 'number') sfxVol = parsed.sfxVol;
+    if (typeof parsed.textSizeSetting === 'number') textSizeSetting = parsed.textSizeSetting;
+    if (typeof parsed.difficulty === 'string') {
+      const normalized = normalizeDifficultyValue(parsed.difficulty);
+      if (normalized) {
+        difficultySetting = normalized;
+        setDifficulty(normalized, { regenerate: false, reason: 'load-local-settings' });
+      }
+    }
+    if (typeof applyVolumes === 'function') applyVolumes();
+    verboseLog('[game] loaded saved settings', parsed);
+  } catch (err) {
+    console.warn('[game] loadLocalSettings failed', err);
+  }
+}
+
+function applyVolumes() {
+  const normalizedVol = Math.max(0, Math.min(1, (musicVol || 0) * (masterVol || 0)));
+  if (gameMusic && typeof gameMusic.setVolume === 'function') {
+    gameMusic.setVolume(normalizedVol);
+  }
 }
 
 function openInGameSettings(currentVals) {
   if (settingsOverlayDiv) {
-    // If it's a container from createZoomStablePanel, it might have a .remove() method on the DOM element
-    // But our helper returns an object { close, container }.
-    // If settingsOverlayDiv is just the DOM element, .remove() works.
-    // If we used the helper, we should probably store the object.
-    // For now, let's just remove the DOM element if it exists.
     settingsOverlayDiv.remove();
     settingsOverlayDiv = null;
+    settingsOverlayPanel = null;
   }
 
-  // Use the helper
-  const { container, panel, close } = createZoomStablePanel(420, 540, 'gd-settings-overlay');
+  if (currentVals && typeof currentVals === 'object') {
+    if (typeof currentVals.masterVol === 'number') masterVol = currentVals.masterVol;
+    if (typeof currentVals.musicVol === 'number') musicVol = currentVals.musicVol;
+    if (typeof currentVals.sfxVol === 'number') sfxVol = currentVals.sfxVol;
+    if (typeof currentVals.difficulty === 'string') {
+      setDifficulty(currentVals.difficulty, { regenerate: false, reason: 'sync' });
+    }
+  }
+
+  const { container, panel, close } = createZoomStablePanel(720, 540, 'gd-settings-overlay');
   decorateSettingsPanel(panel);
-  
-  // Store container so we can check if it exists (for pausing)
+
   settingsOverlayDiv = container;
   settingsOverlayPanel = panel;
-  
-  // We need to handle closing properly to stop the zoom loop
-  // We can attach the close function to the container for easy access
   container.closeZoomPanel = close;
-  container.zoomPanel = panel;
 
   let title = createDiv('SETTINGS');
   title.parent(panel);
-  title.style('font-size', '40px'); 
+  title.style('font-size', '42px');
   title.style('font-weight', 'bold');
-  title.style('margin-bottom', '24px');
-  title.style('color', '#ffcc00');
+  title.style('margin-bottom', '18px');
+  title.style('color', MENU_GOLD_COLOR);
   title.style('text-shadow', '3px 3px 0 #000');
 
-  const createSliderRow = (label, val, callback) => {
-    let row = createDiv('');
-    row.parent(panel);
-    row.style('display', 'flex');
-    row.style('flex-direction', 'column');
-    row.style('align-items', 'center');
-    row.style('margin-bottom', '18px');
-    row.style('width', '88%');
+  const layoutRow = createDiv('');
+  layoutRow.parent(panel);
+  layoutRow.style('display', 'flex');
+  layoutRow.style('gap', '26px');
+  layoutRow.style('width', '100%');
+  layoutRow.style('flex', '1');
+  layoutRow.style('min-height', '340px');
+  layoutRow.style('align-items', 'stretch');
+  layoutRow.style('margin', '0 auto');
+  layoutRow.style('max-width', '980px');
 
-    let lbl = createDiv(`${label}: ${Math.floor(val * 100)}%`);
-    lbl.parent(row);
-    lbl.style('font-size', '20px'); 
-    lbl.style('margin-bottom', '8px');
+  const categoryColumn = createDiv('');
+  categoryColumn.parent(layoutRow);
+  categoryColumn.style('flex', '0 0 32%');
+  categoryColumn.style('display', 'flex');
+  categoryColumn.style('flex-direction', 'column');
+  categoryColumn.style('gap', '12px');
+  categoryColumn.style('padding', '6px 0');
+  categoryColumn.style('height', '100%');
+  categoryColumn.style('justify-content', 'center');
+  categoryColumn.style('align-items', 'stretch');
+  categoryColumn.style('box-sizing', 'border-box');
 
-    let slider = createSlider(0, 1, val, 0.01);
-    slider.parent(row);
-    slider.style('width', '100%');
-    slider.style('height', '18px');
-    
-    slider.input(() => {
-      let v = slider.value();
-      lbl.html(`${label}: ${Math.floor(v * 100)}%`);
-      callback(v);
-    });
+  const settingsColumnWrapper = createDiv('');
+  settingsColumnWrapper.parent(layoutRow);
+  settingsColumnWrapper.style('flex', '1');
+  settingsColumnWrapper.style('display', 'flex');
+  settingsColumnWrapper.style('flex-direction', 'column');
+  settingsColumnWrapper.style('height', '100%');
+  settingsColumnWrapper.style('justify-content', 'center');
+  settingsColumnWrapper.style('align-items', 'stretch');
+  settingsColumnWrapper.style('box-sizing', 'border-box');
+
+  const settingsColumn = createDiv('');
+  settingsColumn.parent(settingsColumnWrapper);
+  settingsColumn.style('flex', '1');
+  settingsColumn.style('height', '100%');
+  settingsColumn.style('display', 'flex');
+  settingsColumn.style('flex-direction', 'column');
+  settingsColumn.style('gap', '12px');
+  settingsColumn.style('overflow', 'hidden');
+
+  const settingsBody = createDiv('');
+  settingsBody.parent(settingsColumn);
+  settingsBody.style('flex', '1');
+  settingsBody.style('display', 'flex');
+  settingsBody.style('flex-direction', 'column');
+  settingsBody.style('gap', '12px');
+  settingsBody.style('overflow-y', 'auto');
+  settingsBody.style('padding-right', '4px');
+  settingsBody.style('height', '100%');
+
+  const categoryButtons = [];
+  let activeCategoryBtn = null;
+
+  let placeholderMessage = createDiv('Select a category to reveal its settings.');
+  placeholderMessage.parent(settingsBody);
+  placeholderMessage.style('color', '#ccc');
+  placeholderMessage.style('font-size', '20px');
+  placeholderMessage.style('text-align', 'center');
+  placeholderMessage.style('margin-top', '8px');
+  let placeholderVisible = true;
+
+  const selectCategory = (label, btn) => {
+    if (placeholderVisible && placeholderMessage) {
+      placeholderMessage.remove();
+      placeholderVisible = false;
+    }
+    if (activeCategoryBtn) {
+      activeCategoryBtn.style('filter', 'none');
+      activeCategoryBtn.style('transform', 'scale(1)');
+      const baseShadow = activeCategoryBtn.elt?.dataset.baseShadow || '0 6px 14px rgba(0,0,0,0.6)';
+      activeCategoryBtn.style('box-shadow', baseShadow);
+      if (activeCategoryBtn.elt) activeCategoryBtn.elt.dataset.settingsActive = 'false';
+    }
+    activeCategoryBtn = btn;
+    btn.style('filter', 'brightness(1.08)');
+    btn.style('transform', 'scale(1.02)');
+    btn.style('box-shadow', '0 10px 26px rgba(255,215,160,0.45), inset 0 0 0 2px rgba(255,255,255,0.25)');
+    if (btn.elt) btn.elt.dataset.settingsActive = 'true';
+
+    clearSubSettings();
+    settingsBody.html('');
+
+    const ctx = createSettingsContext({ container: settingsBody });
+    const builder = CATEGORY_BUILDERS[label];
+    if (builder) builder(ctx);
+    syncSlidersToSettings();
   };
 
-  createSliderRow('Master', masterVol, (v) => {
-    masterVol = v;
-    if (gameMusic) gameMusic.setVolume(musicVol * masterVol);
-    saveLocalSettings();
+  SETTINGS_CATEGORIES.forEach(label => {
+    const btn = createButton(label);
+    btn.parent(categoryColumn);
+    applySettingsTabSkin(btn);
+    btn.style('font-size', '18px');
+    btn.style('letter-spacing', '0.2px');
+    btn.mousePressed(() => selectCategory(label, btn));
+    categoryButtons.push(btn);
   });
 
-  createSliderRow('Music', musicVol, (v) => {
-    musicVol = v;
-    if (gameMusic) gameMusic.setVolume(musicVol * masterVol);
-    saveLocalSettings();
-  });
-
-  createSliderRow('SFX', sfxVol, (v) => {
-    sfxVol = v;
-    saveLocalSettings();
-  });
-
-  let diffRow = createDiv('');
-  diffRow.parent(panel);
-  diffRow.style('margin-top', '10px');
-  diffRow.style('text-align', 'center');
-
-  let diffLabel = createDiv('DIFFICULTY');
-  diffLabel.parent(diffRow);
-  diffLabel.style('font-size', '32px');
-  diffLabel.style('margin-bottom', '10px');
-
-  let diffSel = createSelect();
-  diffSel.parent(diffRow);
-  diffSel.style('font-size', '28px');
-  diffSel.style('padding', '8px');
-  diffSel.style('width', '300px');
-  diffSel.style('background', '#333');
-  diffSel.style('color', 'white');
-  diffSel.style('border', '2px solid #666');
-  
-  diffSel.option('Easy', 'easy');
-  diffSel.option('Normal', 'normal');
-  diffSel.option('Hard', 'hard');
-  
-  if (typeof currentDifficulty !== 'undefined') diffSel.selected(currentDifficulty);
-  else diffSel.selected('normal');
-
-  diffSel.changed(() => {
-    let d = diffSel.value();
-    try { setDifficulty(d, { regenerate: false, reason: 'user-settings' }); } 
-    catch(e) { currentDifficulty = d; }
-    difficultySetting = d;
-    saveLocalSettings();
-  });
 
   let closeBtn = createButton('CLOSE');
   closeBtn.parent(panel);
-  closeBtn.style('margin-top', '38px');
-  applyMenuButtonUI(closeBtn, 220, 46);
+  closeBtn.style('margin-top', '16px');
+  closeBtn.style('align-self', 'center');
+  applyMenuButtonUI(closeBtn, 260, 52);
+  closeBtn.style('border-color', MENU_GOLD_COLOR);
+  closeBtn.style('box-shadow', '0 8px 20px rgba(0,0,0,0.7)');
 
   closeBtn.mousePressed(() => {
     if (container.closeZoomPanel) container.closeZoomPanel();
     else container.remove();
-    
+
     settingsOverlayDiv = null;
     settingsOverlayPanel = null;
-    
-    // Re-open main menu if it was open?
-    // Or just set inGameMenuVisible = true which now triggers openInGameMenu via Escape?
-    // Actually, if we just set inGameMenuVisible = true, the draw loop won't draw the menu (since I disabled it).
-    // So we must call openInGameMenu().
+    clearSubSettings();
+
     openInGameMenu();
   });
 }
@@ -4647,14 +4755,6 @@ function hideSettingsMenu() {
   categoryButtons = [];
 }
 
-function applyVolumes() {
-  if (gameMusic) {
-    
-    const vol = Math.max(0, Math.min(1, musicVol * masterVol));
-    gameMusic.setVolume(vol);
-  }
-}
-
 function playClickSFX() {
   if (clickSFX) {
     clickSFX.setVolume(sfxVol * masterVol);
@@ -4748,9 +4848,10 @@ function styleSmallButton(btn) {
   btn.style("cursor", "pointer");
   btn.style("color", "white");
   btn.style("text-shadow", "0 0 8px #ffffff60");
+  btn.style('border-radius', '2px');
   if (btn.elt) {
     btn.elt.style.position = 'absolute';
-    btn.elt.style.pointerEvents = 'auto';
+  btn.style('background-image', `url('${MENU_BUTTON_TEXTURE_PATH}')`);
     btn.elt.style.zIndex = '10001';
   }
 }
@@ -4996,9 +5097,10 @@ function stylePixelButton(btn) {
   btn.style('border', 'none');
   btn.style('color', 'white');
   btn.style('cursor', 'pointer');
+  btn.style('border-radius', '2px');
   
   
-  btn.style('background-image', "url('assets/3-GUI/Button BG.png')");
+  btn.style('background-image', `url('${MENU_BUTTON_TEXTURE_PATH}')`);
   btn.style('background-size', '100% 100%');
   btn.style('background-repeat', 'no-repeat');
   btn.style('image-rendering', 'pixelated'); 
@@ -5079,21 +5181,6 @@ function spawnCloud(forceX) {
     verticalDrift: (Math.random() - 0.5) * 0.15,
     driftPhase: Math.random() * Math.PI * 2
   });
-}
-
-let _saveTimer = null;
-function saveLocalSettingsDebounced() {
-  
-  if (_saveTimer) clearTimeout(_saveTimer);
-  
-  
-  _saveTimer = setTimeout(() => {
-    try {
-      const settings = { masterVol, musicVol, sfxVol, textSizeSetting, difficulty: difficultySetting };
-      localStorage.setItem("menuSettings", JSON.stringify(settings));
-      verboseLog('[game] Settings saved (debounced)');
-    } catch(e) {}
-  }, 500);
 }
 
 function buildGameplaySettings(ctx) {
@@ -5182,16 +5269,27 @@ function createSettingsContext({ container }) {
       el.style('flex', '1');
   };
 
+  const audioSettingKey = (label) => {
+    if (label === 'Master Volume') return 'masterVol';
+    if (label === 'Music Volume') return 'musicVol';
+    if (label === 'SFX Volume') return 'sfxVol';
+    return null;
+  };
+
+  const recordElement = (el) => {
+    if (el) activeSettingElements.push(el);
+  };
+
   const createRow = () => {
-      const row = createDiv('');
-      row.parent(container);
-      row.style('display', 'flex');
-      row.style('align-items', 'center');
-      row.style('justify-content', 'space-between');
-      row.style('width', '100%');
-      row.style('margin-bottom', '10px');
-      activeSettingElements.push(row);
-      return row;
+    const row = createDiv('');
+    row.parent(container);
+    row.style('display', 'flex');
+    row.style('align-items', 'center');
+    row.style('justify-content', 'space-between');
+    row.style('width', '100%');
+    row.style('margin-bottom', '10px');
+    recordElement(row);
+    return row;
   };
 
   const ctx = {
@@ -5201,39 +5299,77 @@ function createSettingsContext({ container }) {
     container: container, // Expose container
 
     pushElement(el) {
-        activeSettingElements.push(el);
+      recordElement(el);
         return ctx;
     },
 
-    addSliderRow(name, min, max, val, callback) {
+    addSliderRow(name, min, max, val, callback, opts = {}) {
       const row = createRow();
 
       const lbl = createDiv(name);
       lbl.parent(row);
       styleLabel(lbl);
+      recordElement(lbl);
       
       const slider = createSlider(min, max, val);
       slider.parent(row);
       slider.style('width', '100%'); 
       styleInput(slider);
+      if (opts && opts.isAudio) {
+        const key = audioSettingKey(name);
+        if (key) slider.attribute('data-setting', key);
+      }
+      recordElement(slider);
       
       slider.input(() => callback(slider.value()));
       
       return ctx;
     },
 
-    addCheckboxRow(name, state) {
+    addCheckboxRow(name, state = false, options = {}) {
       const row = createRow();
 
       const lbl = createDiv(name);
       lbl.parent(row);
       styleLabel(lbl);
+      recordElement(lbl);
 
-      const cb = createCheckbox('', state);
-      cb.parent(row);
-      styleInput(cb);
-      cb.style('transform', 'scale(1.5)');
-      
+      const toggle = createDiv('');
+      toggle.parent(row);
+      toggle.style('width', '36px');
+      toggle.style('height', '36px');
+      toggle.style('display', 'flex');
+      toggle.style('align-items', 'center');
+      toggle.style('justify-content', 'center');
+      toggle.style('border', `2px solid ${MENU_GOLD_BORDER}`);
+      toggle.style('border-radius', '6px');
+      toggle.style('box-shadow', `inset 0 0 0 2px rgba(0,0,0,0.4)`);
+      toggle.style('cursor', 'pointer');
+      toggle.style('font-size', '24px');
+      toggle.style('font-family', 'MyFont, sans-serif');
+      toggle.style('color', MENU_GOLD_COLOR);
+      toggle.style('background', 'rgba(255,255,255,0.05)');
+      toggle.style('transition', 'background 0.2s ease, transform 0.2s ease');
+      recordElement(toggle);
+
+      let checked = !!state;
+      const updateVisual = (value) => {
+        toggle.html(value ? '✔' : '');
+        toggle.style('background', value ? `rgba(184,134,11,0.35)` : 'rgba(255,255,255,0.05)');
+        toggle.style('box-shadow', value ? `0 0 12px ${MENU_GOLD_GLOW}` : 'inset 0 0 0 2px rgba(0,0,0,0.4)');
+        toggle.style('transform', value ? 'scale(1.05)' : 'none');
+      };
+      updateVisual(checked);
+
+      const toggleHandler = () => {
+        checked = !checked;
+        updateVisual(checked);
+        if (typeof options.onChange === 'function') {
+          options.onChange(checked);
+        }
+      };
+      toggle.mousePressed(toggleHandler);
+
       return ctx;
     },
 
@@ -5243,6 +5379,7 @@ function createSettingsContext({ container }) {
       const lbl = createDiv(name);
       lbl.parent(row);
       styleLabel(lbl);
+      recordElement(lbl);
 
       const sel = createSelect();
       sel.parent(row);
@@ -5258,6 +5395,7 @@ function createSettingsContext({ container }) {
       
       if (options.value) sel.value(options.value);
       if (options.onChange) sel.changed(() => options.onChange(sel.value()));
+      recordElement(sel);
 
       return ctx;
     }
